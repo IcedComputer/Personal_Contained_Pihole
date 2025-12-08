@@ -1,0 +1,71 @@
+################################################################################
+# Pi-hole + VPN Installer Configuration Example: Security Only
+# File: installer.conf.security
+# Category: Example Configuration
+# 
+# Description:
+#   Security-focused profile with malware, phishing, and basic tracking protection.
+#   Minimal false positives, ideal for business/server environments.
+#   Best for: Servers, business networks, minimal maintenance.
+#
+# Usage:
+#   1. Copy to installer.conf: cp examples/installer.conf.security installer.conf
+#   2. Customize network settings (IP, port) if needed
+#   3. Run installer: sudo bash install-pihole-vpn.sh
+#
+################################################################################
+
+# ============================================================================
+# PLATFORM CONFIGURATION
+# ============================================================================
+# Azure VM example
+PLATFORM="azure"
+
+# ============================================================================
+# SERVER TYPE CONFIGURATION
+# ============================================================================
+# Security profile: Malware/phishing/tracking only
+SERVER_TYPE="security"
+
+# ============================================================================
+# DNS PROVIDER CONFIGURATION
+# ============================================================================
+# Cloudflared: Fast, reliable, DoH encryption
+# Configured for security.cloudflare-dns.com (anti-malware)
+DNS_TYPE="cloudflared"
+
+# ============================================================================
+# VPN CONFIGURATION
+# ============================================================================
+# Install WireGuard VPN for secure remote access
+INSTALL_VPN="yes"
+
+# WireGuard port (custom port for Azure)
+WIREGUARD_PORT="51820"
+
+# ============================================================================
+# NETWORK CONFIGURATION
+# ============================================================================
+# Static IP for Azure VM (private IP)
+STATIC_IPV4="10.0.0.10"
+
+# ============================================================================
+# GPG KEY CONFIGURATION
+# ============================================================================
+# No encrypted lists for security profile
+GPG_KEY_COUNT=0
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+# Enable MFA for SSH (recommended for cloud deployments)
+ENABLE_MFA="yes"
+
+# SSH user
+#REAL_USER="azureuser"
+
+# ============================================================================
+# ADVANCED OPTIONS
+# ============================================================================
+# Debug mode disabled for production
+#DEBUG_MODE=false

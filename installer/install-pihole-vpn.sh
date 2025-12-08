@@ -1,0 +1,1650 @@
+#!/bin/bash
+#
+# Pi-hole + VPN Installer
+# File: install-pihole-vpn.sh
+# Created: 2025-12-07
+# Last Modified: 2025-12-07
+# Version: 1.0.0
+#
+# Description: Automated installer for Pi-hole with WireGuard VPN
+#              Supports Raspberry Pi and Ubuntu Server (Azure)
+#              Configurable upstream DNS (Cloudflared or Unbound)
+#              Includes SSH hardening and optional MFA (Google Authenticator)
+#
+# Security Features:
+# - AllowUsers SSH restriction (auto-detects real user via SUDO_USER)
+# - Optional Multi-Factor Authentication with google-authenticator
+# - Progressive Fail2Ban banning (25min → 7day → permanent)
+# - All cron jobs run as root (system-level maintenance)
+#
+# Following Universal Constants:
+# - UC-001: Code clarity over cleverness
+# - UC-002: Meaningful naming conventions
+# - UC-003: ISO 8601 date format
+# - UC-004: Professional communication
+#
+# Usage: sudo bash install-pihole-vpn.sh [OPTIONS]
+#        Options: --debug, --config=FILE
+#
+
+set -euo pipefail
+
+# ============================================================================
+# GLOBAL VARIABLES
+# ============================================================================
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/installer.conf"
+DEBUG_MODE=false
+LOG_FILE="/var/log/pihole-vpn-install.log"
+
+# Color codes for output
+readonly COLOR_GREEN='\033[0;32m'
+readonly COLOR_RED='\033[1;31m'
+readonly COLOR_YELLOW='\033[0;33m'
+readonly COLOR_BLUE='\033[0;34m'
+readonly COLOR_RESET='\033[0m'
+
+# Installation paths (from Deployment.sh structure)
+readonly PATH_SCRIPTS="/scripts"
+readonly PATH_TEMP="/scripts/temp"
+readonly PATH_FINISHED="/scripts/Finished"
+readonly PATH_CONFIG="/scripts/Finished/CONFIG"
+readonly PATH_PIHOLE="/etc/pihole"
+
+# WireGuard paths
+readonly WIREGUARD_DIR="/etc/wireguard"
+readonly WIREGUARD_CONFIG="${WIREGUARD_DIR}/wg0.conf"
+readonly CLIENTS_DIR="${WIREGUARD_DIR}/clients"
+readonly WIREGUARD_SERVER_NETWORK="10.7.0"
+readonly WIREGUARD_SERVER_IP="${WIREGUARD_SERVER_NETWORK}.1"
+readonly WIREGUARD_CIDR="24"
+
+# Warning tracking
+declare -a WARNINGS=()
+declare -a ERRORS=()
+
+# Installation state
+PLATFORM=""              # "azure", "rpi", or "other"
+SERVER_TYPE=""           # "full", "security", etc.
+DNS_TYPE=""              # "cloudflared" or "unbound"
+INSTALL_VPN=""           # "yes" or "no"
+WIREGUARD_PORT=""        # Default 51820
+PIHOLE_VERSION="6"       # Always install latest (v6)
+DETECTED_IPV4=""
+STATIC_IPV4=""
+GPG_KEY_COUNT=0
+REAL_USER=""             # Actual user (not root) who ran sudo
+ENABLE_MFA=""            # "yes" or "no" for 2FA setup
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+log() {
+    local message="$1"
+    echo "$(date --iso-8601=seconds) - ${message}" | tee -a "${LOG_FILE}"
+}
+
+log_success() {
+    local message="$1"
+    echo -e "${COLOR_GREEN}✓${COLOR_RESET} ${message}" | tee -a "${LOG_FILE}"
+}
+
+log_error() {
+    local message="$1"
+    echo -e "${COLOR_RED}✗ ERROR: ${message}${COLOR_RESET}" | tee -a "${LOG_FILE}"
+    ERRORS+=("${message}")
+}
+
+log_warning() {
+    local message="$1"
+    echo -e "${COLOR_YELLOW}⚠ WARNING: ${message}${COLOR_RESET}" | tee -a "${LOG_FILE}"
+    WARNINGS+=("${message}")
+    sleep 2  # Give user moment to read
+}
+
+log_info() {
+    local message="$1"
+    echo -e "${COLOR_BLUE}ℹ${COLOR_RESET} ${message}" | tee -a "${LOG_FILE}"
+}
+
+debug_log() {
+    if [[ "${DEBUG_MODE}" == true ]]; then
+        echo -e "${COLOR_BLUE}[DEBUG]${COLOR_RESET} $1" | tee -a "${LOG_FILE}"
+    fi
+}
+
+show_header() {
+    clear
+    echo -e "${COLOR_BLUE}"
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║         Pi-hole + WireGuard VPN Installer v${VERSION}         ║"
+    echo "║                                                              ║"
+    echo "║  Automated setup for Pi-hole with WireGuard VPN              ║"
+    echo "║  Supports: Raspberry Pi, Ubuntu Server, Azure                ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo -e "${COLOR_RESET}\n"
+}
+
+show_summary_report() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                  INSTALLATION SUMMARY                        ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    if [[ ${#ERRORS[@]} -gt 0 ]]; then
+        echo -e "${COLOR_RED}╔══════════════════════════════════════════════════════════════╗${COLOR_RESET}"
+        echo -e "${COLOR_RED}║                    ERRORS ENCOUNTERED                        ║${COLOR_RESET}"
+        echo -e "${COLOR_RED}╚══════════════════════════════════════════════════════════════╝${COLOR_RESET}"
+        for error in "${ERRORS[@]}"; do
+            echo -e "${COLOR_RED}  ✗ ${error}${COLOR_RESET}"
+        done
+        echo ""
+    fi
+    
+    if [[ ${#WARNINGS[@]} -gt 0 ]]; then
+        echo -e "${COLOR_YELLOW}╔══════════════════════════════════════════════════════════════╗${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}║                   WARNINGS REPORTED                          ║${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}╚══════════════════════════════════════════════════════════════╝${COLOR_RESET}"
+        for warning in "${WARNINGS[@]}"; do
+            echo -e "${COLOR_YELLOW}  ⚠ ${warning}${COLOR_RESET}"
+        done
+        echo ""
+    fi
+    
+    if [[ ${#ERRORS[@]} -eq 0 ]] && [[ ${#WARNINGS[@]} -eq 0 ]]; then
+        echo -e "${COLOR_GREEN}✓ Installation completed successfully with no issues!${COLOR_RESET}"
+        echo ""
+    fi
+    
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                    IMPORTANT NOTES                           ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  • All cron jobs run as root (system maintenance)"
+    echo "  • SSH access restricted to user: ${REAL_USER}"
+    
+    if [[ "${ENABLE_MFA}" == "yes" ]]; then
+        echo "  • MFA setup required: Run as ${REAL_USER}:"
+        echo "      sudo -u ${REAL_USER} google-authenticator"
+    fi
+    
+    if [[ "${INSTALL_VPN}" == "yes" ]]; then
+        echo "  • Add VPN clients: ${PATH_FINISHED}/wireguard-manager.sh"
+    fi
+    
+    echo ""
+    log_info "Full installation log: ${LOG_FILE}"
+}
+
+# ============================================================================
+# VALIDATION FUNCTIONS
+# ============================================================================
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_error "This script must be run as root (use sudo)"
+        exit 1
+    fi
+}
+
+detect_real_user() {
+    # Detect the actual user who ran sudo (not root)
+    if [[ -n "${SUDO_USER}" ]]; then
+        REAL_USER="${SUDO_USER}"
+    elif [[ -n "${LOGNAME}" ]] && [[ "${LOGNAME}" != "root" ]]; then
+        REAL_USER="${LOGNAME}"
+    else
+        # Fallback: ask user
+        read -p "Enter your username (not root): " REAL_USER
+        if [[ -z "${REAL_USER}" ]] || [[ "${REAL_USER}" == "root" ]]; then
+            log_error "Valid non-root username required"
+            exit 1
+        fi
+    fi
+    
+    # Verify user exists
+    if ! id "${REAL_USER}" >/dev/null 2>&1; then
+        log_error "User '${REAL_USER}' does not exist"
+        exit 1
+    fi
+    
+    log_info "Detected user: ${REAL_USER}"
+}
+
+detect_platform() {
+    debug_log "Detecting platform..."
+    
+    # Check for Azure metadata service
+    if curl -s -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" >/dev/null 2>&1; then
+        PLATFORM="azure"
+        log_success "Detected platform: Azure Ubuntu Server"
+        return 0
+    fi
+    
+    # Check for Raspberry Pi
+    if [[ -f /proc/device-tree/model ]] && grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
+        PLATFORM="rpi"
+        log_success "Detected platform: Raspberry Pi"
+        return 0
+    fi
+    
+    # Check architecture
+    local arch=$(uname -m)
+    if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "armv7l" ]]; then
+        PLATFORM="rpi"
+        log_warning "ARM architecture detected, assuming Raspberry Pi"
+        return 0
+    fi
+    
+    # Unknown platform
+    PLATFORM="other"
+    log_warning "Could not auto-detect platform (Azure or RPi)"
+    
+    # Prompt user
+    echo ""
+    echo "Select your platform:"
+    echo "1) Ubuntu Server (Azure or other cloud)"
+    echo "2) Raspberry Pi"
+    echo "3) Other Linux system"
+    read -p "Enter choice [1-3]: " choice
+    
+    case $choice in
+        1) PLATFORM="azure" ;;
+        2) PLATFORM="rpi" ;;
+        3) PLATFORM="other" ;;
+        *) 
+            log_error "Invalid choice"
+            exit 1
+            ;;
+    esac
+    
+    log_success "Platform set to: ${PLATFORM}"
+}
+
+detect_network() {
+    debug_log "Detecting network configuration..."
+    
+    # Detect primary network interface
+    local interface=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++)if($i~/dev/)print $(i+1)}')
+    DETECTED_IPV4=$(ip route get 8.8.8.8 | awk '{print $7}')
+    local gateway=$(ip route get 8.8.8.8 | awk '{print $3}')
+    
+    debug_log "Interface: ${interface}"
+    debug_log "Detected IPv4: ${DETECTED_IPV4}"
+    debug_log "Gateway: ${gateway}"
+    
+    if [[ -z "${DETECTED_IPV4}" ]]; then
+        log_error "Could not detect IPv4 address"
+        return 1
+    fi
+    
+    log_success "Detected IPv4: ${DETECTED_IPV4}"
+}
+
+validate_ip() {
+    local ip=$1
+    local valid_ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
+    
+    if [[ $ip =~ $valid_ip_regex ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ============================================================================
+# CONFIGURATION FUNCTIONS
+# ============================================================================
+
+load_config_file() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        debug_log "No config file found at ${CONFIG_FILE}"
+        return 1
+    fi
+    
+    log_info "Loading configuration from ${CONFIG_FILE}..."
+    
+    # Source the config file
+    # shellcheck source=/dev/null
+    source "${CONFIG_FILE}"
+    
+    # Validate required variables
+    local config_valid=true
+    
+    [[ -z "${SERVER_TYPE:-}" ]] && config_valid=false
+    [[ -z "${DNS_TYPE:-}" ]] && config_valid=false
+    [[ -z "${INSTALL_VPN:-}" ]] && config_valid=false
+    
+    if [[ "${config_valid}" == false ]]; then
+        log_warning "Config file incomplete or invalid"
+        return 1
+    fi
+    
+    log_success "Configuration loaded successfully"
+    return 0
+}
+
+show_config_summary() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║               DETECTED CONFIGURATION                         ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  Platform:          ${PLATFORM}"
+    echo "  Server Type:       ${SERVER_TYPE}"
+    echo "  DNS Provider:      ${DNS_TYPE}"
+    echo "  Install VPN:       ${INSTALL_VPN}"
+    echo "  WireGuard Port:    ${WIREGUARD_PORT}"
+    echo "  Static IPv4:       ${STATIC_IPV4}"
+    echo "  GPG Keys to Import: ${GPG_KEY_COUNT}"
+    echo ""
+}
+
+prompt_configuration() {
+    log_info "Starting interactive configuration..."
+    
+    # Server Type
+    echo ""
+    echo "Select Pi-hole configuration profile:"
+    echo "1) Full (all lists - maximum protection)"
+    echo "2) Security (security-focused lists only)"
+    echo "3) Basic (minimal lists)"
+    read -p "Enter choice [1-3]: " type_choice
+    
+    case $type_choice in
+        1) SERVER_TYPE="full" ;;
+        2) SERVER_TYPE="security" ;;
+        3) SERVER_TYPE="basic" ;;
+        *) 
+            log_error "Invalid choice"
+            exit 1
+            ;;
+    esac
+    log_success "Server type: ${SERVER_TYPE}"
+    
+    # DNS Provider
+    echo ""
+    echo "Select upstream DNS provider:"
+    echo "1) Unbound (local recursive DNS, most private)"
+    echo "2) Cloudflared (DNS over HTTPS via Cloudflare)"
+    read -p "Enter choice [1-2]: " dns_choice
+    
+    case $dns_choice in
+        1) DNS_TYPE="unbound" ;;
+        2) DNS_TYPE="cloudflared" ;;
+        *) 
+            log_error "Invalid choice"
+            exit 1
+            ;;
+    esac
+    log_success "DNS provider: ${DNS_TYPE}"
+    
+    # VPN Installation
+    echo ""
+    read -p "Install WireGuard VPN? [Y/n]: " vpn_choice
+    case ${vpn_choice,,} in
+        y|yes|"") INSTALL_VPN="yes" ;;
+        n|no) INSTALL_VPN="no" ;;
+        *)
+            log_error "Invalid choice"
+            exit 1
+            ;;
+    esac
+    log_success "VPN installation: ${INSTALL_VPN}"
+    
+    # WireGuard Port
+    if [[ "${INSTALL_VPN}" == "yes" ]]; then
+        echo ""
+        read -p "WireGuard port [51820]: " wg_port
+        WIREGUARD_PORT="${wg_port:-51820}"
+        
+        if ! [[ "${WIREGUARD_PORT}" =~ ^[0-9]+$ ]] || [[ "${WIREGUARD_PORT}" -lt 1024 ]] || [[ "${WIREGUARD_PORT}" -gt 65535 ]]; then
+            log_warning "Invalid port, using default 51820"
+            WIREGUARD_PORT="51820"
+        fi
+        log_success "WireGuard port: ${WIREGUARD_PORT}"
+    fi
+    
+    # Static IP
+    echo ""
+    echo "Detected IP address: ${DETECTED_IPV4}"
+    read -p "Use this IP as static? [Y/n] or enter different IP: " ip_choice
+    
+    case ${ip_choice,,} in
+        y|yes|"")
+            STATIC_IPV4="${DETECTED_IPV4}"
+            ;;
+        *)
+            if validate_ip "${ip_choice}"; then
+                STATIC_IPV4="${ip_choice}"
+            else
+                log_warning "Invalid IP format, using detected IP"
+                STATIC_IPV4="${DETECTED_IPV4}"
+            fi
+            ;;
+    esac
+    log_success "Static IPv4: ${STATIC_IPV4}"
+    
+    # GPG Keys
+    echo ""
+    read -p "How many GPG public keys do you need to import for encrypted lists? [0-5]: " key_count
+    if [[ "${key_count}" =~ ^[0-5]$ ]]; then
+        GPG_KEY_COUNT="${key_count}"
+    else
+        log_warning "Invalid count, setting to 0"
+        GPG_KEY_COUNT=0
+    fi
+    log_success "GPG keys to import: ${GPG_KEY_COUNT}"
+    
+    # Multi-Factor Authentication
+    echo ""
+    read -p "Enable Multi-Factor Authentication (Google Authenticator) for SSH? [y/N]: " mfa_choice
+    case ${mfa_choice,,} in
+        y|yes) ENABLE_MFA="yes" ;;
+        *) ENABLE_MFA="no" ;;
+    esac
+    log_success "MFA enabled: ${ENABLE_MFA}"
+}
+
+confirm_proceed() {
+    show_config_summary
+    
+    echo ""
+    read -p "Proceed with installation using these settings? [Y/n]: " confirm
+    
+    case ${confirm,,} in
+        y|yes|"")
+            log_success "Configuration confirmed, proceeding with installation"
+            return 0
+            ;;
+        *)
+            log_info "Installation cancelled by user"
+            exit 0
+            ;;
+    esac
+}
+
+# ============================================================================
+# SYSTEM PREPARATION
+# ============================================================================
+
+create_directories() {
+    log_info "Creating directory structure..."
+    
+    mkdir -p "${PATH_SCRIPTS}"
+    mkdir -p "${PATH_TEMP}"
+    mkdir -p "${PATH_FINISHED}"
+    mkdir -p "${PATH_CONFIG}"
+    
+    chmod 755 "${PATH_SCRIPTS}"
+    chmod 755 "${PATH_TEMP}"
+    chmod 755 "${PATH_FINISHED}"
+    chmod 700 "${PATH_CONFIG}"  # Restricted - contains sensitive files (tokens, keys)
+    
+    log_success "Directories created"
+}
+
+system_update() {
+    log_info "Updating system packages..."
+    
+    apt-get update || {
+        log_warning "apt-get update failed, continuing anyway"
+    }
+    
+    apt-get dist-upgrade -y || {
+        log_warning "dist-upgrade had issues, continuing anyway"
+    }
+    
+    apt-get autoremove -y || {
+        log_warning "autoremove had issues, continuing anyway"
+    }
+    
+    log_success "System updated"
+}
+
+install_dependencies() {
+    log_info "Installing required dependencies..."
+    
+    local packages=(
+        "curl"
+        "wget"
+        "git"
+        "sqlite3"
+        "vim"
+        "unattended-upgrades"
+        "fail2ban"
+        "whiptail"
+        "qrencode"
+    )
+    
+    for package in "${packages[@]}"; do
+        if ! apt-get install -y --no-install-recommends "${package}"; then
+            log_warning "Failed to install ${package}, may cause issues later"
+        else
+            log_success "Installed ${package}"
+        fi
+    done
+}
+
+# ============================================================================
+# GPG KEY MANAGEMENT
+# ============================================================================
+
+generate_gpg_key() {
+    log_info "Generating GPG key for this server..."
+    
+    local hostname=$(hostname)
+    local key_name="Pi-hole Server ${hostname}"
+    
+    # Generate key non-interactively
+    cat > "${PATH_TEMP}/gpg-gen-key.conf" <<EOF
+Key-Type: RSA
+Key-Length: 4096
+Subkey-Type: RSA
+Subkey-Length: 4096
+Name-Real: ${key_name}
+Expire-Date: 2y
+%no-protection
+%commit
+EOF
+
+    debug_log "Generating GPG key with config:"
+    debug_log "$(cat ${PATH_TEMP}/gpg-gen-key.conf)"
+    
+    if gpg --batch --generate-key "${PATH_TEMP}/gpg-gen-key.conf" 2>&1 | tee -a "${LOG_FILE}"; then
+        log_success "GPG key generated successfully"
+        
+        # Export public key
+        local key_id=$(gpg --list-keys --with-colons | grep "^fpr" | head -n1 | cut -d: -f10)
+        local export_path="${PATH_FINISHED}/server-public-key.gpg"
+        
+        if gpg --armor --export "${key_id}" > "${export_path}"; then
+            log_success "Public key exported to: ${export_path}"
+            echo ""
+            echo -e "${COLOR_GREEN}╔══════════════════════════════════════════════════════════════╗${COLOR_RESET}"
+            echo -e "${COLOR_GREEN}║           GPG PUBLIC KEY EXPORTED                            ║${COLOR_RESET}"
+            echo -e "${COLOR_GREEN}╚══════════════════════════════════════════════════════════════╝${COLOR_RESET}"
+            echo ""
+            echo "Your server's public GPG key has been exported to:"
+            echo "  ${export_path}"
+            echo ""
+            echo "Share this public key with anyone who needs to encrypt files"
+            echo "for this server."
+            echo ""
+            sleep 3
+        else
+            log_warning "Failed to export public key"
+        fi
+    else
+        log_error "Failed to generate GPG key"
+        return 1
+    fi
+    
+    rm -f "${PATH_TEMP}/gpg-gen-key.conf"
+}
+
+import_gpg_keys() {
+    if [[ ${GPG_KEY_COUNT} -eq 0 ]]; then
+        log_info "No GPG keys to import"
+        return 0
+    fi
+    
+    log_info "Importing ${GPG_KEY_COUNT} GPG public key(s)..."
+    
+    for ((i=1; i<=GPG_KEY_COUNT; i++)); do
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║                  IMPORT GPG KEY ${i}/${GPG_KEY_COUNT}                      ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "Choose import method:"
+        echo "1) From file (provide path)"
+        echo "2) Paste key content directly"
+        read -p "Enter choice [1-2]: " import_choice
+        
+        case $import_choice in
+            1)
+                read -p "Enter full path to public key file: " key_file
+                if [[ -f "${key_file}" ]]; then
+                    if gpg --import "${key_file}" 2>&1 | tee -a "${LOG_FILE}"; then
+                        log_success "Imported key from ${key_file}"
+                    else
+                        log_warning "Failed to import key from ${key_file}"
+                    fi
+                else
+                    log_warning "File not found: ${key_file}"
+                fi
+                ;;
+            2)
+                echo "Paste the GPG public key (including -----BEGIN PGP PUBLIC KEY BLOCK-----)"
+                echo "Press Ctrl+D when done:"
+                local key_content=$(cat)
+                echo "${key_content}" | gpg --import 2>&1 | tee -a "${LOG_FILE}"
+                if [[ $? -eq 0 ]]; then
+                    log_success "Imported key from pasted content"
+                else
+                    log_warning "Failed to import pasted key"
+                fi
+                ;;
+            *)
+                log_warning "Invalid choice, skipping key ${i}"
+                ;;
+        esac
+    done
+    
+    # List imported keys
+    echo ""
+    log_info "Currently imported GPG keys:"
+    gpg --list-keys | tee -a "${LOG_FILE}"
+    echo ""
+    sleep 2
+}
+
+# ============================================================================
+# PI-HOLE INSTALLATION
+# ============================================================================
+
+install_pihole() {
+    log_info "Installing Pi-hole..."
+    
+    # Set environment for unattended install
+    export PIHOLE_SKIP_OS_CHECK=true
+    
+    # Download and run installer
+    if [[ "${PLATFORM}" == "rpi" ]] && [[ -f /etc/debian_version ]]; then
+        curl -sSL https://install.pi-hole.net | PIHOLE_SKIP_OS_CHECK=true bash | tee -a "${LOG_FILE}"
+    else
+        curl -sSL https://install.pi-hole.net | bash | tee -a "${LOG_FILE}"
+    fi
+    
+    if [[ $? -eq 0 ]]; then
+        log_success "Pi-hole installed successfully"
+    else
+        log_error "Pi-hole installation failed"
+        return 1
+    fi
+}
+
+# ============================================================================
+# DNS PROVIDER INSTALLATION
+# ============================================================================
+
+install_unbound() {
+    log_info "Installing Unbound recursive DNS resolver..."
+    
+    if ! apt-get install -y unbound; then
+        log_error "Failed to install unbound"
+        return 1
+    fi
+    
+    log_success "Unbound installed"
+    
+    # Generate Unbound configuration
+    log_info "Configuring Unbound..."
+    
+    # Create Pi-hole optimized Unbound config
+    cat > /etc/unbound/unbound.conf.d/pi-hole.conf << 'EOF'
+server:
+    # Network settings
+    interface: 127.0.0.1
+    port: 5335
+    do-ip4: yes
+    do-udp: yes
+    do-tcp: yes
+    do-ip6: no
+    prefer-ip6: no
+
+    # Root hints for recursive resolution
+    root-hints: "/var/lib/unbound/root.hints"
+
+    # Security settings
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    use-caps-for-id: no
+
+    # Performance optimization
+    edns-buffer-size: 1232
+    prefetch: yes
+    num-threads: 1
+    so-rcvbuf: 1m
+
+    # Privacy - block private IP responses
+    private-address: 192.168.0.0/16
+    private-address: 169.254.0.0/16
+    private-address: 172.16.0.0/12
+    private-address: 10.0.0.0/8
+    private-address: fd00::/8
+    private-address: fe80::/10
+EOF
+    log_success "Generated Unbound Pi-hole configuration"
+    
+    # Generate dnsmasq Unbound configuration locally
+    cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
+server=127.0.0.1#566
+edns-packet-max=1232
+EOF
+    log_success "Generated dnsmasq Unbound configuration"
+    
+    # Disable unbound-resolvconf service
+    systemctl disable --now unbound-resolvconf.service 2>/dev/null || true
+    sed -Ei 's/^unbound_conf=/#unbound_conf=/' /etc/resolvconf.conf 2>/dev/null || true
+    rm -f /etc/unbound/unbound.conf.d/resolvconf_resolvers.conf 2>/dev/null || true
+    
+    # Restart unbound
+    if service unbound restart; then
+        log_success "Unbound service started"
+    else
+        log_error "Failed to start Unbound service"
+        return 1
+    fi
+    
+    # Create root hints update script
+    cat > "${PATH_FINISHED}/unbound_root_hints_update.sh" << 'EOFSCRIPT'
+#!/bin/bash
+# Unbound Root Hints Update Script
+# Updates DNS root server hints from InterNIC
+
+set -euo pipefail
+
+TEMP="/scripts/temp"
+LOG_FILE="/var/log/unbound-root-hints.log"
+
+log_msg() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "${LOG_FILE}"
+}
+
+mkdir -p "${TEMP}"
+
+log_msg "Starting root hints update..."
+
+# Download latest root hints
+if curl --tlsv1.3 -o "${TEMP}/root.hints" https://www.internic.net/domain/named.root; then
+    log_msg "Downloaded root hints successfully"
+    
+    # Verify file is not empty
+    if [[ -s "${TEMP}/root.hints" ]]; then
+        # Backup existing hints
+        if [[ -f "/var/lib/unbound/root.hints" ]]; then
+            cp /var/lib/unbound/root.hints "/var/lib/unbound/root.hints.backup.$(date +%Y%m%d)"
+        fi
+        
+        # Move new hints into place
+        mv "${TEMP}/root.hints" /var/lib/unbound/root.hints
+        chown unbound:unbound /var/lib/unbound/root.hints
+        chmod 644 /var/lib/unbound/root.hints
+        log_msg "Root hints updated successfully"
+        
+        # Restart Unbound
+        if systemctl restart unbound; then
+            log_msg "Unbound restarted successfully"
+        else
+            log_msg "ERROR: Failed to restart Unbound"
+            exit 1
+        fi
+    else
+        log_msg "ERROR: Downloaded file is empty"
+        exit 1
+    fi
+else
+    log_msg "ERROR: Failed to download root hints"
+    exit 1
+fi
+
+log_msg "Root hints update completed"
+EOFSCRIPT
+    chmod +x "${PATH_FINISHED}/unbound_root_hints_update.sh"
+    log_success "Generated Unbound root hints update script"
+    
+    # Run initial root hints download
+    mkdir -p /var/lib/unbound
+    if curl --tlsv1.3 -o "${PATH_TEMP}/root.hints" https://www.internic.net/domain/named.root; then
+        mv "${PATH_TEMP}/root.hints" /var/lib/unbound/root.hints
+        chown unbound:unbound /var/lib/unbound/root.hints
+        chmod 644 /var/lib/unbound/root.hints
+        log_success "Downloaded initial root hints"
+    else
+        log_warning "Failed to download initial root hints"
+    fi
+    
+    # Schedule quarterly root hints update (every 3 months)
+    # Randomize: day 1-5, hour 0-6, minute 0-59, months 1,4,7,10
+    local random_day=$((1 + RANDOM % 5))
+    local random_hour=$((RANDOM % 7))
+    local random_minute=$((RANDOM % 60))
+    (crontab -l 2>/dev/null; echo "${random_minute} ${random_hour} ${random_day} */3 * bash ${PATH_FINISHED}/unbound_root_hints_update.sh >> /var/log/unbound-root-hints.log 2>&1") | crontab -
+    log_success "Scheduled Unbound root hints update (quarterly: $(printf 'day %d, %02d:%02d' ${random_day} ${random_hour} ${random_minute}))"
+}
+
+install_cloudflared() {
+    log_info "Installing Cloudflared DNS over HTTPS..."
+    
+    # Add Cloudflare repository
+    mkdir -p --mode=0755 /usr/share/keyrings
+    
+    if curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; then
+        log_success "Added Cloudflare GPG key"
+    else
+        log_error "Failed to add Cloudflare GPG key"
+        return 1
+    fi
+    
+    # Determine distribution
+    local distro="jammy"  # Default Ubuntu
+    if [[ "${PLATFORM}" == "rpi" ]]; then
+        distro="bookworm"  # Raspberry Pi OS
+    fi
+    
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${distro} main" | \
+        tee /etc/apt/sources.list.d/cloudflared.list
+    
+    apt-get update || log_warning "apt update after adding cloudflared repo had issues"
+    
+    if apt-get install -y cloudflared; then
+        log_success "Cloudflared installed"
+        cloudflared -v | tee -a "${LOG_FILE}"
+    else
+        log_error "Failed to install cloudflared"
+        return 1
+    fi
+    
+    # Generate Cloudflared configuration based on SERVER_TYPE
+    log_info "Configuring Cloudflared..."
+    
+    cat > "${PATH_FINISHED}/cloudflared" << EOF
+# Cloudflared DNS over HTTPS Configuration
+## Last Updated: $(date --iso-8601)
+
+## Normal
+EOF
+    
+    if [[ "${SERVER_TYPE}" == "full" ]] || [[ "${SERVER_TYPE}" == "basic" ]]; then
+        # Full/Basic: Use normal Cloudflare DNS (uncommented)
+        cat >> "${PATH_FINISHED}/cloudflared" << 'EOF'
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/.well-known/dns-query --upstream https://1.0.0.1/.well-known/dns-query
+CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/dns-query --upstream https://1.0.0.1/dns-query --upstream https://cloudflare-dns.com/dns-query
+
+
+## Anti-Malware
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.2/.well-known/dns-query --upstream https://1.0.0.2/.well-known/dns-query
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://security.cloudflare-dns.com/dns-query --upstream https://security.cloudflare-dns.com/dns-query
+
+## Anti-Malware & Anti-Adult
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.3/.well-known/dns-query --upstream https://1.0.0.3/.well-known/dns-query
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://family.cloudflare-dns.com/dns-query --upstream https://family.cloudflare-dns.com/dns-query
+EOF
+        log_success "Generated Cloudflared config (Normal DNS for ${SERVER_TYPE})"
+    else
+        # Security: Use anti-malware DNS (uncommented)
+        cat >> "${PATH_FINISHED}/cloudflared" << 'EOF'
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/.well-known/dns-query --upstream https://1.0.0.1/.well-known/dns-query
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/dns-query --upstream https://1.0.0.1/dns-query --upstream https://cloudflare-dns.com/dns-query
+
+
+## Anti-Malware
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.2/.well-known/dns-query --upstream https://1.0.0.2/.well-known/dns-query
+CLOUDFLARED_OPTS=--port 5053 --upstream https://security.cloudflare-dns.com/dns-query --upstream https://security.cloudflare-dns.com/dns-query
+
+## Anti-Malware & Anti-Adult
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.3/.well-known/dns-query --upstream https://1.0.0.3/.well-known/dns-query
+#CLOUDFLARED_OPTS=--port 5053 --upstream https://family.cloudflare-dns.com/dns-query --upstream https://family.cloudflare-dns.com/dns-query
+EOF
+        log_success "Generated Cloudflared config (Security DNS for ${SERVER_TYPE})"
+    fi
+    
+    # Generate Cloudflared systemd service locally
+    cat > /lib/systemd/system/cloudflared.service << 'EOF'
+[Unit]
+Description=cloudflared DNS over HTTPS proxy
+After=syslog.target network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/scripts/Finished/cloudflared
+ExecStart=/usr/local/bin/cloudflared proxy-dns $CLOUDFLARED_OPTS
+Restart=on-failure
+RestartSec=10
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    log_success "Generated Cloudflared systemd service"
+    
+    # Generate dnsmasq Cloudflared configuration locally
+    echo "server=127.0.0.1#5053" > /etc/dnsmasq.d/50-cloudflared.conf
+    log_success "Generated dnsmasq Cloudflared configuration"
+    
+    # Enable and start service
+    systemctl enable cloudflared
+    if systemctl start cloudflared; then
+        log_success "Cloudflared service started"
+    else
+        log_error "Failed to start Cloudflared service"
+        return 1
+    fi
+    
+    # Fix Pi-hole config for Cloudflared
+    sed -i "s/PIHOLE_DNS/#PIHOLE_DNS/g" /etc/pihole/setupVars.conf 2>/dev/null || true
+    sed -i "s/server=8.8/#server=8.8/g" /etc/dnsmasq.d/01-pihole.conf 2>/dev/null || true
+    
+    # Schedule restart every 5 minutes (from original script)
+    (crontab -l 2>/dev/null; echo "*/5 * * * * /bin/systemctl restart cloudflared") | crontab -
+    log_success "Scheduled Cloudflared periodic restart"
+}
+
+# ============================================================================
+# UPDATE SCRIPT INSTALLATION
+# ============================================================================
+
+install_update_scripts() {
+    log_info "Installing optimized update scripts..."
+    
+    local repo_base="https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master"
+    
+    # Download updates.sh
+    if curl --tlsv1.3 -f -o "${PATH_FINISHED}/updates.sh" \
+        "${repo_base}/scripts/updates.sh"; then
+        chmod +x "${PATH_FINISHED}/updates.sh"
+        log_success "Downloaded updates.sh"
+    else
+        log_error "Failed to download updates.sh"
+        return 1
+    fi
+    
+    # Download refresh.sh
+    if curl --tlsv1.3 -f -o "${PATH_FINISHED}/refresh.sh" \
+        "${repo_base}/scripts/refresh.sh"; then
+        chmod +x "${PATH_FINISHED}/refresh.sh"
+        log_success "Downloaded refresh.sh"
+    else
+        log_error "Failed to download refresh.sh"
+        return 1
+    fi
+    
+    # Download Research.sh
+    if curl --tlsv1.3 -f -o "${PATH_FINISHED}/Research.sh" \
+        "${repo_base}/scripts/Research.sh"; then
+        chmod +x "${PATH_FINISHED}/Research.sh"
+        log_success "Downloaded Research.sh"
+    else
+        log_warning "Failed to download Research.sh (optional)"
+    fi
+    
+    # Test the update script
+    if bash "${PATH_FINISHED}/updates.sh" --help >/dev/null 2>&1; then
+        log_success "Update script validated"
+    else
+        log_warning "Update script may have issues"
+    fi
+}
+
+setup_cron_jobs() {
+    log_info "Setting up cron jobs for automated updates..."
+    
+    # Calculate randomized times
+    # Base time: 3:30 AM (03:30)
+    # Random offset: ±45 minutes = between 02:45 and 04:15
+    local base_hour=3
+    local base_minute=30
+    local offset_minutes=$((RANDOM % 91 - 45))  # -45 to +45
+    
+    local purge_total_minutes=$((base_hour * 60 + base_minute + offset_minutes))
+    local purge_hour=$((purge_total_minutes / 60))
+    local purge_minute=$((purge_total_minutes % 60))
+    
+    # Ensure within 0-23 hours
+    if [[ ${purge_hour} -lt 0 ]]; then
+        purge_hour=$((24 + purge_hour))
+    elif [[ ${purge_hour} -ge 24 ]]; then
+        purge_hour=$((purge_hour - 24))
+    fi
+    
+    log_info "purge-and-update scheduled at: $(printf "%02d:%02d" ${purge_hour} ${purge_minute})"
+    
+    # Calculate allow-update times (every 8 hours, offset from purge time)
+    local allow_time1_minutes=${purge_total_minutes}
+    local allow_time2_minutes=$((allow_time1_minutes + 480))  # +8 hours
+    local allow_time3_minutes=$((allow_time2_minutes + 480))  # +8 hours
+    
+    # Wrap around 24 hours
+    allow_time1_minutes=$((allow_time1_minutes % 1440))
+    allow_time2_minutes=$((allow_time2_minutes % 1440))
+    allow_time3_minutes=$((allow_time3_minutes % 1440))
+    
+    local allow_hour1=$((allow_time1_minutes / 60))
+    local allow_minute1=$((allow_time1_minutes % 60))
+    local allow_hour2=$((allow_time2_minutes / 60))
+    local allow_minute2=$((allow_time2_minutes % 60))
+    local allow_hour3=$((allow_time3_minutes / 60))
+    local allow_minute3=$((allow_time3_minutes % 60))
+    
+    log_info "allow-update scheduled at: $(printf "%02d:%02d" ${allow_hour1} ${allow_minute1}), $(printf "%02d:%02d" ${allow_hour2} ${allow_minute2}), $(printf "%02d:%02d" ${allow_hour3} ${allow_minute3})"
+    
+    # Calculate refresh time (1-3 hours before purge-and-update)
+    local refresh_offset=$((RANDOM % 121 + 60))  # 60-180 minutes before
+    local refresh_total_minutes=$((purge_total_minutes - refresh_offset))
+    if [[ ${refresh_total_minutes} -lt 0 ]]; then
+        refresh_total_minutes=$((1440 + refresh_total_minutes))
+    fi
+    local refresh_hour=$((refresh_total_minutes / 60))
+    local refresh_minute=$((refresh_total_minutes % 60))
+    
+    log_info "refresh (gravity update) scheduled at: $(printf "%02d:%02d" ${refresh_hour} ${refresh_minute})"
+    
+    # Add cron jobs
+    (
+        crontab -l 2>/dev/null
+        echo "# Pi-hole automated updates (installed $(date --iso-8601))"
+        echo "${purge_minute} ${purge_hour} * * * bash ${PATH_FINISHED}/updates.sh purge-and-update >> /var/log/pihole-purge-update.log 2>&1"
+        echo "${allow_minute1} ${allow_hour1} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
+        echo "${allow_minute2} ${allow_hour2} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
+        echo "${allow_minute3} ${allow_hour3} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
+        echo "${refresh_minute} ${refresh_hour} * * * bash ${PATH_FINISHED}/updates.sh refresh >> /var/log/pihole-refresh.log 2>&1"
+    ) | crontab -
+    
+    log_success "Cron jobs configured successfully"
+    
+    # Show summary
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║               SCHEDULED UPDATE TIMES                         ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    printf "  Gravity Refresh:    %02d:%02d daily\n" ${refresh_hour} ${refresh_minute}
+    printf "  Full Purge+Update:  %02d:%02d daily\n" ${purge_hour} ${purge_minute}
+    printf "  Allow List Update:  %02d:%02d, %02d:%02d, %02d:%02d daily\n" \
+        ${allow_hour1} ${allow_minute1} ${allow_hour2} ${allow_minute2} ${allow_hour3} ${allow_minute3}
+    
+    if [[ "${DNS_TYPE}" == "unbound" ]]; then
+        printf "  Unbound Root Hints: Quarterly (every 3 months)\n"
+    fi
+    
+    echo ""
+    sleep 3
+}
+
+# ============================================================================
+# WIREGUARD VPN INSTALLATION
+# ============================================================================
+
+install_wireguard() {
+    if [[ "${INSTALL_VPN}" != "yes" ]]; then
+        log_info "Skipping WireGuard installation (not requested)"
+        return 0
+    fi
+    
+    log_info "Installing WireGuard VPN (modern implementation)..."
+    
+    # Install WireGuard packages
+    if ! apt-get install -y wireguard wireguard-tools qrencode iptables-persistent; then
+        log_error "Failed to install WireGuard packages"
+        return 1
+    fi
+    
+    log_success "WireGuard packages installed"
+    
+    # Create WireGuard directory structure
+    mkdir -p "${WIREGUARD_DIR}"
+    mkdir -p "${CLIENTS_DIR}"
+    chmod 700 "${WIREGUARD_DIR}"
+    chmod 700 "${CLIENTS_DIR}"
+    
+    # Generate server keys
+    log_info "Generating WireGuard server keys..."
+    local server_private_key=$(wg genkey)
+    local server_public_key=$(echo "${server_private_key}" | wg pubkey)
+    
+    # Determine server network interface
+    local server_interface=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++)if($i~/dev/)print $(i+1)}')
+    
+    # Create server configuration
+    log_info "Creating WireGuard server configuration..."
+    
+    cat > "${WIREGUARD_CONFIG}" <<EOF
+# WireGuard Server Configuration
+# Created: $(date --iso-8601=seconds)
+# Server Public Key: ${server_public_key}
+
+[Interface]
+Address = ${WIREGUARD_SERVER_IP}/${WIREGUARD_CIDR}
+ListenPort = ${WIREGUARD_PORT}
+PrivateKey = ${server_private_key}
+
+# Forwarding and NAT rules
+PostUp = iptables -A FORWARD -i %i -j ACCEPT
+PostUp = iptables -A FORWARD -o %i -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o ${server_interface} -j MASQUERADE
+PostUp = iptables -I FORWARD -i %i -o %i -j REJECT --reject-with icmp-admin-prohibited
+
+PostDown = iptables -D FORWARD -i %i -j ACCEPT
+PostDown = iptables -D FORWARD -o %i -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o ${server_interface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -o %i -j REJECT --reject-with icmp-admin-prohibited 2>/dev/null || true
+
+# DNS - Point to Pi-hole
+# Clients will use this server's Pi-hole for DNS filtering
+
+# Clients added below:
+EOF
+
+    chmod 600 "${WIREGUARD_CONFIG}"
+    
+    # Save server public key for client configs
+    echo "${server_public_key}" > "${WIREGUARD_DIR}/server-public.key"
+    chmod 600 "${WIREGUARD_DIR}/server-public.key"
+    
+    log_success "Server configuration created"
+    
+    # Enable IP forwarding
+    log_info "Enabling IP forwarding..."
+    
+    if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    fi
+    
+    if ! grep -q "^net.ipv6.conf.all.forwarding=1" /etc/sysctl.conf; then
+        echo "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+    fi
+    
+    sysctl -p >/dev/null 2>&1
+    
+    log_success "IP forwarding enabled"
+    
+    # Enable and start WireGuard
+    log_info "Starting WireGuard service..."
+    
+    systemctl enable wg-quick@wg0
+    
+    if systemctl start wg-quick@wg0; then
+        log_success "WireGuard service started"
+    else
+        log_error "Failed to start WireGuard service"
+        return 1
+    fi
+    
+    # Configure firewall for WireGuard
+    configure_wireguard_firewall
+    
+    # Create client management helper script
+    install_wireguard_helpers
+    
+    log_success "WireGuard VPN installation complete"
+    
+    # Display server information
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║              WIREGUARD SERVER INFORMATION                    ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  Server Public Key: ${server_public_key}"
+    echo "  Server IP (VPN):   ${WIREGUARD_SERVER_IP}"
+    echo "  Listen Port:       ${WIREGUARD_PORT}"
+    echo "  Network:           ${WIREGUARD_SERVER_NETWORK}/${WIREGUARD_CIDR}"
+    echo ""
+    echo "  Use wireguard-manager.sh to add/remove clients"
+    echo ""
+    sleep 3
+}
+
+configure_wireguard_firewall() {
+    log_info "Configuring firewall for WireGuard..."
+    
+    # Allow WireGuard port
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow "${WIREGUARD_PORT}/udp" comment "WireGuard VPN" || log_warning "Failed to add ufw rule"
+    fi
+    
+    # Save iptables rules
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save || log_warning "Failed to save iptables rules"
+    elif command -v iptables-save >/dev/null 2>&1; then
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || log_warning "Failed to save iptables rules"
+    fi
+    
+    log_success "Firewall configured"
+}
+
+install_wireguard_helpers() {
+    log_info "Installing WireGuard helper scripts..."
+    
+    # Copy wireguard-manager.sh to PATH_FINISHED
+    if [[ -f "${SCRIPT_DIR}/wireguard-manager.sh" ]]; then
+        cp "${SCRIPT_DIR}/wireguard-manager.sh" "${PATH_FINISHED}/"
+        chmod +x "${PATH_FINISHED}/wireguard-manager.sh"
+        log_success "Installed wireguard-manager.sh"
+    else
+        # Download if not present
+        if curl --tlsv1.3 -o "${PATH_FINISHED}/wireguard-manager.sh" \
+            'https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/scripts/wireguard-manager.sh' 2>/dev/null; then
+            chmod +x "${PATH_FINISHED}/wireguard-manager.sh"
+            log_success "Downloaded wireguard-manager.sh"
+        else
+            log_warning "Could not install wireguard-manager.sh, will need manual client management"
+        fi
+    fi
+}
+
+# ============================================================================
+# SECURITY & FINALIZATION
+# ============================================================================
+
+setup_fail2ban() {
+    log_info "Configuring Fail2Ban with progressive banning..."
+    
+    # Create progressive banning configuration
+    cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+# Ban settings
+bantime  = 1500        # 25 minutes (1500 seconds)
+maxretry = 3           # 3 attempts before initial ban
+findtime = 600         # 10 minute window for attempts
+
+# Email alerts (configure if desired)
+destemail = root@localhost
+sender = fail2ban@localhost
+action = %(action_)s
+
+# Enable sshd protection
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s
+
+# Pi-hole admin protection
+[pihole]
+enabled = true
+port = http,https
+filter = pihole
+logpath = /var/log/pihole.log
+maxretry = 3
+
+# Recidivist jail - 7 day ban after 3 short bans in 24 hours
+[recidive]
+enabled = true
+filter = recidive
+logpath = /var/log/fail2ban.log
+bantime = 604800       # 7 days
+findtime = 86400       # 24 hour window
+maxretry = 3           # After 3 short bans
+action = %(action_mwl)s
+
+# Permanent ban jail - forever after 2 recidive bans
+[recidive-permanent]
+enabled = true
+filter = recidive-permanent
+logpath = /var/log/fail2ban.log
+bantime = -1           # Permanent ban (-1 = forever)
+findtime = 604800      # 7 day window
+maxretry = 2           # After 2 recidive bans
+action = %(action_mwl)s
+EOF
+    log_success "Generated Fail2Ban jail configuration"
+    
+    # Create Pi-hole filter
+    cat > /etc/fail2ban/filter.d/pihole.conf << 'EOF'
+[Definition]
+failregex = ^.* "(GET|POST|HEAD).* HTTP.*" 401 .*$
+            ^.* "(GET|POST|HEAD).* HTTP.*" 403 .*$
+ignoreregex =
+EOF
+    log_success "Generated Pi-hole Fail2Ban filter"
+    
+    # Create recidive-permanent filter (tracks recidive bans)
+    cat > /etc/fail2ban/filter.d/recidive-permanent.conf << 'EOF'
+[Definition]
+failregex = ^%(__prefix_line)s\[recidive\] Ban <HOST>$
+ignoreregex =
+EOF
+    log_success "Generated recidive-permanent Fail2Ban filter"
+    
+    # Restart Fail2Ban to apply configuration
+    systemctl enable fail2ban
+    if systemctl restart fail2ban; then
+        log_success "Fail2Ban started with progressive banning"
+        log_info "Ban progression: 3 attempts → 25 min | 3 bans/24h → 7 days | 2 recidive → permanent"
+    else
+        log_error "Failed to restart Fail2Ban"
+    fi
+}
+
+configure_server_dns() {
+    log_info "Configuring server to use itself for DNS..."
+    
+    # Unlink and relink resolv.conf
+    unlink /etc/resolv.conf 2>/dev/null || true
+    ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
+    systemctl restart systemd-resolved.service 2>/dev/null || true
+    
+    # Comment out existing nameservers and add localhost
+    sed -i "s/^nameserver/#nameserver/g" /etc/resolv.conf 2>/dev/null || true
+    echo "nameserver 127.0.0.1" >> /etc/resolv.conf
+    
+    log_success "Server configured to use local Pi-hole DNS"
+}
+
+setup_unattended_upgrades() {
+    log_info "Configuring unattended upgrades..."
+    
+    if apt-get install -y --no-install-recommends unattended-upgrades; then
+        log_success "Unattended upgrades enabled"
+    else
+        log_warning "Failed to enable unattended upgrades"
+    fi
+}
+
+harden_ssh() {
+    log_info "Hardening SSH configuration..."
+    
+    local sshd_config="/etc/ssh/sshd_config"
+    local backup="${sshd_config}.backup.$(date +%Y%m%d-%H%M%S)"
+    
+    # Backup original config
+    cp "${sshd_config}" "${backup}" || {
+        log_error "Failed to backup sshd_config"
+        return 1
+    }
+    log_info "Backed up SSH config to ${backup}"
+    
+    # Check if AllowUsers already exists
+    if grep -q "^AllowUsers" "${sshd_config}"; then
+        # Append user if not already present
+        if ! grep "^AllowUsers" "${sshd_config}" | grep -q "${REAL_USER}"; then
+            sed -i "s/^AllowUsers.*/& ${REAL_USER}/" "${sshd_config}"
+            log_success "Added ${REAL_USER} to existing AllowUsers"
+        else
+            log_info "${REAL_USER} already in AllowUsers"
+        fi
+    else
+        # Add new AllowUsers line
+        echo "" >> "${sshd_config}"
+        echo "# Restrict SSH access to specific users" >> "${sshd_config}"
+        echo "AllowUsers ${REAL_USER}" >> "${sshd_config}"
+        log_success "Added AllowUsers ${REAL_USER} to SSH config"
+    fi
+    
+    # Additional SSH hardening
+    local changes_made=false
+    
+    # Disable root login
+    if grep -q "^PermitRootLogin yes" "${sshd_config}"; then
+        sed -i 's/^PermitRootLogin yes/PermitRootLogin no/' "${sshd_config}"
+        changes_made=true
+        log_info "Disabled root SSH login"
+    fi
+    
+    # Disable password authentication (after MFA is set up, optional)
+    # Uncommented for now to allow initial MFA setup
+    # if grep -q "^PasswordAuthentication yes" "${sshd_config}"; then
+    #     sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' "${sshd_config}"
+    #     log_info "Disabled password authentication (key-based only)"
+    # fi
+    
+    # Test SSH config
+    if sshd -t 2>/dev/null; then
+        systemctl restart sshd || systemctl restart ssh || {
+            log_error "Failed to restart SSH service"
+            log_warning "Restoring backup config..."
+            cp "${backup}" "${sshd_config}"
+            systemctl restart sshd || systemctl restart ssh
+            return 1
+        }
+        log_success "SSH configuration updated and service restarted"
+    else
+        log_error "SSH config test failed, restoring backup"
+        cp "${backup}" "${sshd_config}"
+        return 1
+    fi
+    
+    log_warning "IMPORTANT: Test SSH access before closing this session!"
+    sleep 3
+}
+
+setup_mfa() {
+    [[ "${ENABLE_MFA}" != "yes" ]] && return 0
+    
+    log_info "Setting up Multi-Factor Authentication (Google Authenticator)..."
+    
+    # Install google-authenticator
+    if ! apt-get install -y libpam-google-authenticator; then
+        log_error "Failed to install google-authenticator"
+        return 1
+    fi
+    log_success "Installed google-authenticator"
+    
+    # Configure PAM
+    local pam_sshd="/etc/pam.d/sshd"
+    local backup_pam="${pam_sshd}.backup.$(date +%Y%m%d-%H%M%S)"
+    cp "${pam_sshd}" "${backup_pam}"
+    
+    if ! grep -q "pam_google_authenticator.so" "${pam_sshd}"; then
+        echo "" >> "${pam_sshd}"
+        echo "# Google Authenticator" >> "${pam_sshd}"
+        echo "auth required pam_google_authenticator.so" >> "${pam_sshd}"
+        log_success "Added Google Authenticator to PAM configuration"
+    else
+        log_info "Google Authenticator already configured in PAM"
+    fi
+    
+    # Configure SSHD for keyboard-interactive
+    local sshd_config="/etc/ssh/sshd_config"
+    local backup_sshd="${sshd_config}.backup.mfa.$(date +%Y%m%d-%H%M%S)"
+    cp "${sshd_config}" "${backup_sshd}"
+    
+    # Enable keyboard-interactive authentication
+    if grep -q "^KbdInteractiveAuthentication no" "${sshd_config}"; then
+        sed -i 's/^KbdInteractiveAuthentication no/KbdInteractiveAuthentication yes/' "${sshd_config}"
+        log_info "Enabled keyboard-interactive authentication"
+    elif grep -q "^ChallengeResponseAuthentication no" "${sshd_config}"; then
+        sed -i 's/^ChallengeResponseAuthentication no/ChallengeResponseAuthentication yes/' "${sshd_config}"
+        log_info "Enabled challenge-response authentication"
+    else
+        echo "" >> "${sshd_config}"
+        echo "# Enable 2FA" >> "${sshd_config}"
+        echo "KbdInteractiveAuthentication yes" >> "${sshd_config}"
+        log_info "Added keyboard-interactive authentication"
+    fi
+    
+    # Restart SSH
+    if systemctl restart sshd || systemctl restart ssh; then
+        log_success "SSH service restarted with MFA support"
+    else
+        log_error "Failed to restart SSH"
+        return 1
+    fi
+    
+    # Run google-authenticator setup for the real user
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║          GOOGLE AUTHENTICATOR SETUP REQUIRED                 ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  You must run this command as ${REAL_USER} BEFORE logging out:"
+    echo ""
+    echo "    sudo -u ${REAL_USER} google-authenticator"
+    echo ""
+    echo "  Answer the prompts:"
+    echo "    - Time-based tokens: YES"
+    echo "    - Update .google_authenticator file: YES"
+    echo "    - Disallow multiple uses: YES"
+    echo "    - Increase time window: NO (or YES if experiencing sync issues)"
+    echo "    - Enable rate-limiting: YES"
+    echo ""
+    echo "  Scan the QR code with your authenticator app (e.g., Google Authenticator)"
+    echo ""
+    log_warning "MFA configured but NOT active until you run: sudo -u ${REAL_USER} google-authenticator"
+    sleep 5
+}
+
+cleanup_installation() {
+    log_info "Cleaning up temporary files..."
+    
+    rm -rf "${PATH_TEMP}"/* 2>/dev/null || true
+    apt-get autoremove -y || true
+    apt-get clean || true
+    
+    log_success "Cleanup completed"
+}
+
+# ============================================================================
+# MAIN INSTALLATION FLOW
+# ============================================================================
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --debug)
+                DEBUG_MODE=true
+                log_info "Debug mode enabled"
+                shift
+                ;;
+            --config=*)
+                CONFIG_FILE="${1#*=}"
+                shift
+                ;;
+            --help)
+                show_header
+                echo "Usage: sudo bash install-pihole-vpn.sh [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --debug          Enable debug output"
+                echo "  --config=FILE    Use specified config file"
+                echo "  --help           Show this help message"
+                echo ""
+                echo "If no config file is specified, installer will run interactively."
+                echo ""
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+main() {
+    # Initialize
+    show_header
+    parse_arguments "$@"
+    
+    log "========================================"
+    log "Pi-hole + VPN Installer v${VERSION}"
+    log "Started: $(date --iso-8601=seconds)"
+    log "========================================"
+    
+    # Pre-flight checks
+    check_root
+    detect_platform
+    detect_network
+    
+    # Configuration
+    if load_config_file; then
+        show_config_summary
+        
+        # Validate and fix any issues
+        echo ""
+        read -p "Configuration looks good? [Y/n]: " config_ok
+        if [[ ! "${config_ok,,}" =~ ^(y|yes|)$ ]]; then
+            log_info "Entering interactive configuration mode..."
+            prompt_configuration
+        fi
+    else
+        prompt_configuration
+    fi
+    
+    confirm_proceed
+    
+    # Detect real user (before any user-specific operations)
+    detect_real_user
+    
+    # Installation steps
+    create_directories
+    system_update
+    install_dependencies
+    setup_unattended_upgrades
+    setup_fail2ban
+    
+    # SSH Hardening (before MFA so user can still login)
+    harden_ssh
+    
+    # GPG Setup
+    generate_gpg_key
+    import_gpg_keys
+    
+    # Core installation
+    install_pihole
+    
+    # DNS Provider
+    case "${DNS_TYPE}" in
+        unbound)
+            install_unbound
+            ;;
+        cloudflared)
+            install_cloudflared
+            ;;
+        *)
+            log_error "Invalid DNS type: ${DNS_TYPE}"
+            exit 1
+            ;;
+    esac
+    
+    # Update scripts
+    install_update_scripts
+    setup_cron_jobs
+    
+    # VPN
+    install_wireguard
+    
+    # Finalization
+    configure_server_dns
+    
+    # MFA Setup (at the very end, requires user action)
+    setup_mfa
+    
+    cleanup_installation
+    
+    # Summary
+    log "========================================"
+    log "Installation completed: $(date --iso-8601=seconds)"
+    log "========================================"
+    
+    show_summary_report
+    
+    # Final instructions
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                   NEXT STEPS                                 ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "1. Update SSH configuration:"
+    echo "   Edit /etc/ssh/sshd_config and add your username to AllowUsers"
+    echo ""
+    
+    if [[ "${INSTALL_VPN}" == "yes" ]]; then
+        echo "2. Create WireGuard VPN clients:"
+        echo "   Run: sudo bash ${PATH_FINISHED}/wireguard-manager.sh"
+        echo ""
+    fi
+    
+    echo "3. Access Pi-hole admin interface:"
+    echo "   http://${STATIC_IPV4}/admin"
+    echo ""
+    echo "4. Set Pi-hole admin password:"
+    echo "   sudo pihole -a -p"
+    echo ""
+    echo "5. Review installation log:"
+    echo "   ${LOG_FILE}"
+    echo ""
+    echo "6. Reboot server to apply all changes:"
+    echo "   sudo reboot"
+    echo ""
+}
+
+# Run main function
+main "$@"

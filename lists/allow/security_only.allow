@@ -1,0 +1,33 @@
+################################################################################
+# Pi-hole Configuration File
+# File: security_only.allow
+# Type: Domain Allowlist
+# Category: Network Services
+# Repository: Personal_Contained_Pihole/lists/allow/
+# 
+# Created: 2020-07-03
+# Organized: 2025-12-07
+# Last Modified: 2025-10-27
+# Version: 1.0.0
+#
+# Description: 
+#   Essential domains for local network functionality and required services.
+#   Includes URL shorteners and other domains that might be blocked by security
+#   lists but are needed for legitimate business or personal use.
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+aka.ms
+bit.ly
+goo.gl
+ow.ly
+qrcodes.pro
+rebrand.ly
+shorturl.at
+t.co
+w.wiki
+youtu.be

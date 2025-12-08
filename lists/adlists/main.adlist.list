@@ -1,0 +1,193 @@
+################################################################################
+# Pi-hole Configuration File
+# File: main.adlist.list
+# Type: Adlist Configuration
+# Category: Comprehensive Blocking
+# Repository: Personal_Contained_Pihole/lists/adlists/
+# 
+# Created: 2020-07-03
+# Organized: 2025-12-07
+# Last Modified: 2025-08-20
+# Version: 1.0.0
+#
+# Description: 
+#   Master adlist configuration with comprehensive blocking coverage. Includes
+#   blocklists for ads, tracking, malware, phishing, fake news, domain squatting,
+#   and other threats. This is the primary blocklist collection for full network
+#   protection with aggressive filtering.
+#
+# Usage:
+#   Loaded into Pi-hole adlist configuration
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#   References both external blocklists and local custom lists
+#
+################################################################################
+
+## Local Lists
+file:///scripts/Finished/CONFIG/encrypt.list
+
+
+## International Propaganda / Fake News 
+https://raw.githubusercontent.com/dnsblocklistnet/blocklists/master/conspiracy.list
+https://raw.githubusercontent.com/RPiList/specials/master/Blocklisten/Fake-Science
+https://raw.githubusercontent.com/RPiList/specials/master/Blocklisten/SupportingRussia
+https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts
+https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-only/hosts
+
+## Domain Squatting
+https://raw.githubusercontent.com/RPiList/specials/master/Blocklisten/DomainSquatting1
+https://raw.githubusercontent.com/RPiList/specials/master/Blocklisten/DomainSquatting2
+
+
+## Ads & Tracking
+https://gist.githubusercontent.com/opus-x/3e673a9d5db2a214df05929a4eee6a57/raw/8b9085ea74be4a36aa1348bfe6af7135bafb6ea1/Spotify_Eliminate_Advertisements
+https://gist.githubusercontent.com/Shujito/b7a8f8f971b22f49b4313d7d3e8e6931/raw/4a37da8edb85f218103e7c5abbaccba5ec23cceb/spotihosts
+https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts;showintro=0
+https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/ads.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/tracking.txt
+https://raw.githubusercontent.com/craiu/mobiletrackers/master/list.txt
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/Android/androidblocklist.txt
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/MobileAppAds/appadsblocklist.txt
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/Tracking/trackingblocklist.txt
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/WhatsAppblocklist/whatsappblocklist.txt
+https://raw.githubusercontent.com/Firestorrrm/Minimal-Hosts-Blocker/master/iosadlist.txt
+https://raw.githubusercontent.com/Firestorrrm/Minimal-Hosts-Blocker/master/youtubeads.txt
+https://raw.githubusercontent.com/hectorm/hmirror/master/data/disconnect.me-tracking/list.txt
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/adHosts.blocklist
+https://raw.githubusercontent.com/notracking/hosts-blocklists/master/hostnames.txt
+https://raw.githubusercontent.com/Perflyst/PiHoleBlocklist/master/android-tracking.txt
+https://raw.githubusercontent.com/Ultimate-Hosts-Blacklist/quidsup_notrack_trackers/master/domains.list
+https://s3.amazonaws.com/lists.disconnect.me/simple_ad.txt
+https://s3.amazonaws.com/lists.disconnect.me/simple_tracking.txt
+https://v.firebog.net/hosts/Prigent-Ads.txt
+https://www.github.developerdan.com/hosts/lists/ads-and-tracking-extended.txt
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/light.txt
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.amazon.txt
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.huawei.txt
+
+## Social
+https://raw.githubusercontent.com/blocklistproject/Lists/master/facebook.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/tiktok.txt
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/Facebook/facebookblocklist.txt
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/MiFitXiaomi/mifitxiaomiblocklist.txt
+https://raw.githubusercontent.com/superover/TikTok-Blocklist/master/tiktok.txt
+
+## Crypto
+https://gitlab.com/ZeroDot1/CoinBlockerLists/raw/master/list_browser.txt
+https://gitlab.com/ZeroDot1/CoinBlockerLists/raw/master/list_optional.txt
+https://raw.githubusercontent.com/anudeepND/blacklist/master/CoinMiner.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/crypto.txt
+https://raw.githubusercontent.com/WillPresley/ZeroDot1_CoinBlockerList/refs/heads/main/hosts
+
+## DNS
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/dns.blocklist
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/doh.txt
+
+
+## Malware
+https://bitbucket.org/ethanr/dns-blacklists/raw/8575c9f96e5b4a1308f2f12394abd86d0927a4a0/bad_lists/Mandiant_APT1_Report_Appendix_D.txt
+https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-malware.txt
+https://isc.sans.edu/feeds/suspiciousdomains_High.txt
+https://isc.sans.edu/feeds/suspiciousdomains_Medium.txt
+https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-hosts.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/0adde9aba7765c1708626e0afdec6b0a751ed817/2020-06-15_india/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/43ebc2e9ec536f53aaecc1d7ce9e386f5ddbc4c3/2019-03-06_egypt_oauth/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/8f4bde00435d98b96638f18b299441501c54bacd/2018-12-19_best_practice/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/cd273e0a68abedbeee0ce7fc410fbc9be883ca0c/2020-03-12_uzbekistan/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2020-09-25_finfisher/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-02-24_vietnam/indicators/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-05-28_qatar/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-10-07_donot/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-12-16_cytrox/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2023-03-29_android_campaign/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2024-05-02_wintego_helios/domains.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/malware.txt
+https://raw.githubusercontent.com/Firestorrrm/Minimal-Hosts-Blocker/master/malwarelist.txt
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/tif.txt
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/MalBlock.blocklist
+https://raw.githubusercontent.com/RPiList/specials/master/Blocklisten/malware
+https://raw.githubusercontent.com/Ultimate-Hosts-Blacklist/quidsup_malicious-sites/master/domains.list
+https://s3.amazonaws.com/lists.disconnect.me/simple_malvertising.txt
+https://v.firebog.net/hosts/Prigent-Malware.txt
+https://v.firebog.net/hosts/RPiList-Malware.txt
+
+
+
+## Phishing
+https://phishing.army/download/phishing_army_blocklist_extended.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/ced17db13b47bee7bebdeb1faa606a1d174eedf0/2019-08-16_evolving_phishing/domains.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/phishing.txt
+https://raw.githubusercontent.com/hectorm/hmirror/master/data/eth-phishing-detect/list.txt
+https://v.firebog.net/hosts/RPiList-Phishing.txt
+
+## Ransomware
+https://raw.githubusercontent.com/blocklistproject/Lists/master/ransomware.txt
+
+## Scams & Redirects
+https://raw.githubusercontent.com/blocklistproject/Lists/master/redirect.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/scam.txt
+https://raw.githubusercontent.com/dnsblocklistnet/blocklists/master/multilevelmarketing.list
+https://raw.githubusercontent.com/blocklistproject/Lists/master/fraud.txt
+
+## Smart TV
+https://raw.githubusercontent.com/d43m0nhLInt3r/socialblocklists/master/SmartTV/smarttvblocklist.txt
+https://raw.githubusercontent.com/Perflyst/PiHoleBlocklist/master/SmartTV.txt
+https://blocklistproject.github.io/Lists/smart-tv.txt
+
+## Spam
+https://raw.githubusercontent.com/StevenBlack/hosts/master/data/add.Spam/hosts
+https://www.stopforumspam.com/downloads/toxic_domains_whole.txt
+
+
+
+## NSO
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-07-18_nso/domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-07-18_nso/v2_domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-07-18_nso/v3_domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-07-18_nso/v4_domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/master/2021-07-18_nso/v4_validation_domains.txt
+https://raw.githubusercontent.com/AmnestyTech/investigations/ced17db13b47bee7bebdeb1faa606a1d174eedf0/2019-10-10_nso_morocco/domains.txt
+
+##Lifestyle - Vaping & Drugs
+https://blocklistproject.github.io/Lists/vaping.txt
+https://raw.githubusercontent.com/jaykepeters/Blocklists/master/Drugs/vaping.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/drugs.txt
+
+## Legacy Static Lists (Consolidated)
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/legacy.blocklist
+
+## Other & Hosts
+https://adaway.org/hosts.txt
+https://gist.githubusercontent.com/r0ckarong/36140c95bc105ee13cdc672baa940ab0/raw/87378f77179722c227b7813faddab53df6a38708/blacklist.txt
+https://hostsfile.org/Downloads/hosts.txt
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/ForeignHost.blocklist
+https://pastebin.com/raw/a1TPEPfP
+https://raw.githubusercontent.com/AdAway/adaway.github.io/master/hosts.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/abuse.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/gambling.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/piracy.txt
+https://raw.githubusercontent.com/blocklistproject/Lists/master/torrent.txt
+https://raw.githubusercontent.com/Dawsey21/Lists/master/main-blacklist.txt
+https://raw.githubusercontent.com/deathbybandaid/piholeparser/master/Subscribable-Lists/CountryCodesLists/Germany.txt
+https://raw.githubusercontent.com/durablenapkin/block/master/avast.txt
+https://raw.githubusercontent.com/FadeMind/hosts.extras/master/UncheckyAds/hosts
+https://raw.githubusercontent.com/hectorm/hmirror/master/data/fademind-add.risk/list.txt
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/custom.blocklist
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/test-files/test.blocklist
+https://raw.githubusercontent.com/mitchellkrogza/Ultimate.Hosts.Blacklist/master/hosts/hosts0
+https://raw.githubusercontent.com/mitchellkrogza/Ultimate.Hosts.Blacklist/master/hosts/hosts1
+https://raw.githubusercontent.com/StevenBlack/hosts/master/data/add.2o7Net/hosts
+https://raw.githubusercontent.com/StevenBlack/hosts/master/data/add.Risk/hosts
+https://raw.githubusercontent.com/StevenBlack/hosts/master/data/KADhosts/hosts
+https://raw.githubusercontent.com/StevenBlack/hosts/master/data/StevenBlack/hosts
+https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+https://raw.githubusercontent.com/vokins/yhosts/master/hosts
+https://raw.githubusercontent.com/yous/YousList/master/hosts.txt
+https://someonewhocares.org/hosts/hosts
+https://v.firebog.net/hosts/AdguardDNS.txt
+https://v.firebog.net/hosts/Easyprivacy.txt
+https://v.firebog.net/hosts/Prigent-Adult.txt
+https://v.firebog.net/hosts/static/w3kbl.txt
+https://www.github.developerdan.com/hosts/lists/hate-and-junk-extended.txt
+

@@ -1,0 +1,78 @@
+﻿################################################################################
+# Pi-hole Configuration File
+# File: custom.blocklist
+# Type: Domain Blocklist
+# Category: Custom Blocks
+# Repository: Personal_Contained_Pihole/lists/blocks/
+#
+# Created: 2020-07-04
+# Organized: 2025-12-07
+# Last Modified: 2025-10-06
+# Version: 1.0.0
+#
+# Description:
+#   Manually curated list of tracking sites, malicious domains, and other
+#   problematic hosts requiring blocking. Custom additions not found in
+#   standard blocklists or requiring immediate blocking action.
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+accountingnews.bg
+api.revenuecat.com
+armanidolci.com
+bluepart.online
+bomjesus.pt
+bots-api.kik.com
+brand-messenger.app.khoros.com
+buildingourmovement.com
+cdn.asf4f.us
+cdn.opensourcefonts.org
+cdn.zblkqa.com
+clarity-ingest-eus2-f-sc.eastus2.cloudapp.azure.com
+conservativedirect.com
+domestic-static.duolingo.cn.w.kunlungr.com
+e-komerco.fr
+en.rageagainstthesoap.com
+free.opensourcefonts.org
+fueven.com
+gif9.shop
+heraldledger.com
+hotelalter.pl
+html.contact
+imsdevice.efercro.com
+kepplir.com
+losangeles.cbslocal.com
+louisasweb.com
+maryland.mdidportal.com
+mb.download.gigabyte.com
+medical-school.net
+nutriciavoorjou.nl
+oggte.com
+pirvnota.com
+privatemessage.net
+privatenote.io
+redfet.com
+rtxt.co
+shops.myshopify.com
+tmg-stream.gateway.kik-live.com
+tornote.io
+trekok.com
+tyhpa.com
+usa.buildingourmovement.com
+usatestprep.com
+use-application-dns.net
+vuesz.com
+wheresyoured.at
+wtrmblea.net
+www.acx.com
+www.anomalysix.com
+www.dpreview.com
+www.goodreads.com
+www.pillpack.com
+www.redfet.com
+www.wheresyoured.at
+z.clarity.ms

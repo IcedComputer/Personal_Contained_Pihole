@@ -1,0 +1,48 @@
+################################################################################
+# Pi-hole Configuration File
+# File: adlist.allow
+# Type: Domain Allowlist
+# Category: Blocklist Sources
+# Repository: Personal_Contained_Pihole/lists/allow/
+# 
+# Created: 2020-07-03
+# Organized: 2025-12-07
+# Last Modified: 2025-04-21
+# Version: 1.0.0
+#
+# Description: 
+#   Allowlist for domains hosting Pi-hole blocklists and adlists. Ensures
+#   Pi-hole can successfully download blocklist updates from GitHub, GitLab,
+#   and other hosting providers. Critical for gravity updates.
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+adaway.org
+archive.ph
+bitbucket.org
+blocklist.cyberthreatcoalition.org
+blocklistproject.github.io
+gist.githubusercontent.com
+gitlab.com
+hosts-file.net
+hostsfile.org
+icedcomputer.github.io
+isc.sans.edu
+malware-filter.gitlab.io
+mirror.cedia.org.ec
+mirror1.malwaredomains.com
+pastebin.com
+pgl.yoyo.org
+phishing.army
+raw.githubusercontent.com
+s3.amazonaws.com
+v.firebog.net
+www.github.developerdan.com
+www.malwaredomainlist.com
+www.squidblacklist.org
+www.stopforumspam.com
+lists.malwarepatrol.net

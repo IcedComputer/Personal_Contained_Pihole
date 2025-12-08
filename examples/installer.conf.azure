@@ -1,0 +1,103 @@
+################################################################################
+# Pi-hole + VPN Installer Configuration Example: Azure Cloud Deployment
+# File: installer.conf.azure
+# Category: Example Configuration
+# 
+# Description:
+#   Azure VM deployment with security focus and WireGuard VPN.
+#   Uses Cloudflared for fast DoH, security-focused lists.
+#   Best for: Cloud-based Pi-hole, remote access DNS.
+#
+# Usage:
+#   1. Copy to installer.conf: cp examples/installer.conf.azure installer.conf
+#   2. Customize STATIC_IPV4 for your Azure VM's private IP
+#   3. Run installer: sudo bash install-pihole-vpn.sh
+#
+################################################################################
+
+# ============================================================================
+# PLATFORM CONFIGURATION
+# ============================================================================
+# Azure platform explicitly set
+PLATFORM="azure"
+
+# ============================================================================
+# SERVER TYPE CONFIGURATION
+# ============================================================================
+# Security profile: Minimal false positives for cloud deployment
+SERVER_TYPE="security"
+
+# ============================================================================
+# DNS PROVIDER CONFIGURATION
+# ============================================================================
+# Cloudflared: Fast, reliable for cloud deployments
+DNS_TYPE="cloudflared"
+
+# ============================================================================
+# VPN CONFIGURATION
+# ============================================================================
+# Install WireGuard VPN for secure remote DNS
+INSTALL_VPN="yes"
+
+# WireGuard port (must be allowed in Azure NSG)
+WIREGUARD_PORT="51820"
+
+# ============================================================================
+# NETWORK CONFIGURATION
+# ============================================================================
+# Azure VM private IP (10.0.0.0/24 subnet example)
+STATIC_IPV4="10.0.0.10"
+
+# ============================================================================
+# GPG KEY CONFIGURATION
+# ============================================================================
+# No GPG keys for cloud deployment (simplified)
+GPG_KEY_COUNT=0
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+# MFA enabled for SSH (HIGHLY recommended for cloud VMs)
+ENABLE_MFA="yes"
+
+# SSH user (Azure default)
+REAL_USER="azureuser"
+
+# ============================================================================
+# ADVANCED OPTIONS
+# ============================================================================
+# Debug mode disabled for production
+#DEBUG_MODE=false
+
+# ============================================================================
+# AZURE-SPECIFIC NOTES
+# ============================================================================
+# 1. Network Security Group (NSG) Rules Required:
+#    - Inbound: UDP 51820 (WireGuard) from your IP/range
+#    - Inbound: TCP 22 (SSH) from your IP/range (restrict!)
+#    - Inbound: TCP 80/443 (Pi-hole admin) optional, recommend VPN-only
+#
+# 2. Private IP Configuration:
+#    - Set STATIC_IPV4 to your VM's private IP
+#    - VM's private IP is typically auto-assigned by Azure
+#    - Find it: Azure Portal → VM → Networking → Private IP
+#
+# 3. Public IP (if using):
+#    - Attach a static public IP to VM
+#    - WireGuard clients connect to this public IP
+#    - NSG must allow UDP 51820 from client IPs
+#
+# 4. DNS Configuration:
+#    - After installation, configure clients to use VPN
+#    - VPN provides DNS automatically (10.7.0.1)
+#    - Or use public IP + port forwarding (not recommended)
+#
+# 5. Cost Optimization:
+#    - Use B1s or B1ms VM size (low cost, sufficient for Pi-hole)
+#    - Use Standard HDD for OS disk (Pi-hole doesn't need SSD)
+#    - Consider reserved instance for long-term deployments
+#
+# 6. Monitoring:
+#    - Enable Azure Monitor for VM metrics
+#    - Check /var/log/pihole-updates.log for update status
+#    - Use wireguard-manager.sh to monitor VPN clients

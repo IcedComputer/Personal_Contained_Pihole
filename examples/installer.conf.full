@@ -1,0 +1,74 @@
+################################################################################
+# Pi-hole + VPN Installer Configuration Example: Full Protection
+# File: installer.conf.full
+# Category: Example Configuration
+# 
+# Description:
+#   Full protection profile with all blocklists and comprehensive filtering.
+#   Maximum ad/tracker/malware blocking, may cause some false positives.
+#   Best for: Home networks, privacy-focused deployments.
+#
+# Usage:
+#   1. Copy to installer.conf: cp examples/installer.conf.full installer.conf
+#   2. Customize network settings (IP, port) if needed
+#   3. Run installer: sudo bash install-pihole-vpn.sh
+#
+################################################################################
+
+# ============================================================================
+# PLATFORM CONFIGURATION
+# ============================================================================
+# Leave commented to auto-detect
+#PLATFORM="azure"
+
+# ============================================================================
+# SERVER TYPE CONFIGURATION
+# ============================================================================
+# Full profile: All lists, maximum protection
+SERVER_TYPE="full"
+
+# ============================================================================
+# DNS PROVIDER CONFIGURATION
+# ============================================================================
+# Unbound: Maximum privacy, no third-party logging
+DNS_TYPE="unbound"
+
+# ============================================================================
+# VPN CONFIGURATION
+# ============================================================================
+# Install WireGuard VPN for remote access
+INSTALL_VPN="yes"
+
+# WireGuard port (ensure this is open in firewall)
+WIREGUARD_PORT="51820"
+
+# ============================================================================
+# NETWORK CONFIGURATION
+# ============================================================================
+# Static IP (auto-detected if commented out)
+# Example for home network:
+#STATIC_IPV4="192.168.1.100"
+
+# Example for Azure VM:
+#STATIC_IPV4="10.0.0.10"
+
+# ============================================================================
+# GPG KEY CONFIGURATION
+# ============================================================================
+# Import 1 GPG key for encrypted list decryption
+GPG_KEY_COUNT=1
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+# Enable MFA for SSH (requires post-install configuration)
+ENABLE_MFA="no"
+
+# SSH user (auto-detected from SUDO_USER)
+#REAL_USER="yourusername"
+
+# ============================================================================
+# ADVANCED OPTIONS
+# ============================================================================
+# Debug mode (verbose logging)
+#DEBUG_MODE=false

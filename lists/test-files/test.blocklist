@@ -1,0 +1,47 @@
+################################################################################
+# Pi-hole Configuration File
+# File: test.blocklist
+# Type: Domain Blocklist (Testing)
+# Category: Testing & Validation
+# Repository: Personal_Contained_Pihole/lists/test-files/
+# 
+# Created: 2023-04-25
+# Organized: 2025-12-07
+# Last Modified: 2025-11-19
+# Version: 1.0.0
+#
+# Description: 
+#   Staging area for domains under evaluation before production deployment.
+#   Domains are categorized by destination list (adHosts, MalBlock, custom, etc.)
+#   and validated before moving to permanent blocklists.
+#
+# Usage:
+#   Loaded via trial.adlist.list during testing phases
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+## To adHosts.blocklist (tracking, advertising and other non-malicious hosts)
+
+
+## To MalBlock.blocklist (malware, randsomware, spam, phishing, etc.)
+
+## To custom.blocklist (Other)
+
+## To fakenews.blocklist (Fake News)
+
+## To ForeignHost.blocklist (Non-Malicious / Non-ad Foreign Hosts)
+
+## To dns.blocklist (DNS)
+
+## Unknown
+a1799.dscapi2.akamai.net
+gameplayapi.intel.com
+huracan-936647329.us-east-1.elb.amazonaws.com
+mqtt.2030.ltsapis.goog 
+mtipv6.v.trpcdn.net
+
+
+
+
+

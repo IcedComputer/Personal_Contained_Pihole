@@ -1,0 +1,30 @@
+################################################################################
+# Pi-hole Configuration File
+# File: error.blocklist
+# Type: Domain Blocklist
+# Category: Error Recovery
+# Repository: Personal_Contained_Pihole/lists/blocks/
+# 
+# Created: 2025-09-21
+# Organized: 2025-12-07
+# Last Modified: 2025-09-21
+# Version: 1.0.0
+#
+# Description: 
+#   Domains extracted from other blacklists that had parsing errors or format
+#   issues. Manually verified and added here to ensure coverage despite source
+#   list problems. Requires manual review and validation.
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+academyofexperts.org
+isoftjsc.com
+reachthroughregion.ru
+schomebrewers.com
+slotgacor777.click
+synevde.com
+tacticaldiameter.ru

@@ -1,0 +1,29 @@
+################################################################################
+# Pi-hole Configuration File
+# File: trial.adlist.list
+# Type: Adlist (Testing)
+# Category: Testing & Validation
+# Repository: Personal_Contained_Pihole/lists/test-files/
+# 
+# Created: 2023-04-23
+# Organized: 2025-12-07
+# Last Modified: 2025-09-21
+# Version: 1.0.0
+#
+# Description: 
+#   References to blocklists currently under evaluation. Points to test.blocklist
+#   and other trial lists for validation before production deployment. Used to
+#   safely test new blocking rules without impacting main configuration.
+#
+# Usage:
+#   Manually loaded into Pi-hole for testing periods
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+## This is for my trial blocklist
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/test-files/test.blocklist
+
+
+## 2025-09-21
+https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/error.blocklist

@@ -1,0 +1,38 @@
+################################################################################
+# Pi-hole Configuration File
+# File: dns.blocklist
+# Type: Domain Blocklist
+# Category: DNS Security
+# Repository: Personal_Contained_Pihole/lists/blocks/
+# 
+# Created: 2020-07-03
+# Organized: 2025-12-07
+# Last Modified: 2024-09-13
+# Version: 1.0.0
+#
+# Description: 
+#   Blocks known public DNS resolver servers to prevent DNS leaks and enforce
+#   Pi-hole as the primary DNS resolver. Includes alternative DNS services that
+#   could bypass Pi-hole filtering (Google DNS, Cloudflare, etc.).
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+
+_dns.resolver.arpa
+a5ea368f454db4a59195b08644567074.clo.footprintdns.com
+dig.bdurl.net
+dns-family.adguard.com
+dns.adguard.com
+dns.google
+dns.quad9.net
+doh.dns.apple.com
+doh.familyshield.opendns.com
+doh.opendns.com
+dot.xfinity.com
+mozilla.cloudflare-dns.com
+use-application-dns.net
+www-cdn.icloud.com.akadns.net

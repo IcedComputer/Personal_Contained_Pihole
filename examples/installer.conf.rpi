@@ -1,0 +1,79 @@
+################################################################################
+# Pi-hole + VPN Installer Configuration Example: Raspberry Pi
+# File: installer.conf.rpi
+# Category: Example Configuration
+# 
+# Description:
+#   Optimized configuration for Raspberry Pi deployment.
+#   Full protection profile with Unbound for privacy.
+#   Best for: Home Raspberry Pi setups, local network DNS.
+#
+# Usage:
+#   1. Copy to installer.conf: cp examples/installer.conf.rpi installer.conf
+#   2. Customize network settings for your local network
+#   3. Run installer: sudo bash install-pihole-vpn.sh
+#
+################################################################################
+
+# ============================================================================
+# PLATFORM CONFIGURATION
+# ============================================================================
+# Raspberry Pi auto-detects, but can specify explicitly
+PLATFORM="rpi"
+
+# ============================================================================
+# SERVER TYPE CONFIGURATION
+# ============================================================================
+# Full profile: All lists for maximum home protection
+SERVER_TYPE="full"
+
+# ============================================================================
+# DNS PROVIDER CONFIGURATION
+# ============================================================================
+# Unbound: Best for privacy on home network
+DNS_TYPE="unbound"
+
+# ============================================================================
+# VPN CONFIGURATION
+# ============================================================================
+# Install WireGuard VPN for remote access to home network
+INSTALL_VPN="yes"
+
+# WireGuard port (ensure router forwards this UDP port)
+WIREGUARD_PORT="51820"
+
+# ============================================================================
+# NETWORK CONFIGURATION
+# ============================================================================
+# Static IP on home network (192.168.x.x range)
+# Reserve this IP in your router to avoid DHCP conflicts
+STATIC_IPV4="192.168.1.100"
+
+# ============================================================================
+# GPG KEY CONFIGURATION
+# ============================================================================
+# Import 1 GPG key for encrypted custom lists
+GPG_KEY_COUNT=1
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+# MFA optional for home use (enable for enhanced security)
+ENABLE_MFA="no"
+
+# SSH user (typically 'pi' on Raspberry Pi OS)
+REAL_USER="pi"
+
+# ============================================================================
+# ADVANCED OPTIONS
+# ============================================================================
+# Debug mode disabled
+#DEBUG_MODE=false
+
+# ============================================================================
+# NOTES FOR RASPBERRY PI
+# ============================================================================
+# 1. Forward UDP port 51820 in your router to Pi-hole's IP (for WireGuard)
+# 2. Configure router DNS to point to Pi-hole IP (192.168.1.100)
+# 3. Or configure DHCP to assign Pi-hole as DNS server
+# 4. Access Pi-hole admin: http://192.168.1.100/admin

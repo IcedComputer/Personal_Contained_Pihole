@@ -1,0 +1,37 @@
+################################################################################
+# Pi-hole Configuration File
+# File: basic.allow
+# Type: Domain Allowlist
+# Category: Essential Services
+# Repository: Personal_Contained_Pihole/lists/allow/
+# 
+# Created: 2020-07-03
+# Organized: 2025-12-07
+# Last Modified: 2025-11-18
+# Version: 1.0.0
+#
+# Description: 
+#   Core allowlist for essential services and functionality. Includes domains
+#   required for Apple push notifications, Google RCS messaging, Microsoft
+#   support, and other critical network services. Prevents false positives.
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+127.0.0.1
+acs-vzw.jibe.google.com
+api.push.apple.com
+fp-us-tmobile.rcs.telephony.goog
+fp-us-verizon.rcs.telephony.goog
+rcs-acs-att-us.jibe.google.com
+rcs-acs-tmobile-us.jibe.google.com
+rcsbusinessmessaging.googleapis.com
+share.google
+support.microsoft.com
+telephony.goog
+
+#end
+

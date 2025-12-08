@@ -1,0 +1,40 @@
+################################################################################
+# Pi-hole Configuration File
+# File: test.regex
+# Type: Regex Rules (Testing)
+# Category: Testing & Validation
+# Repository: Personal_Contained_Pihole/lists/test-files/
+# 
+# Created: 2023-04-23
+# Organized: 2025-12-07
+# Last Modified: 2025-08-20
+# Version: 1.0.0
+#
+# Description: 
+#   Testing environment for new regex patterns before production deployment.
+#   Used to validate pattern effectiveness and check for false positives before
+#   adding patterns to main.regex or other production regex lists.
+#
+# Usage:
+#   Loaded via trial.adlist.list during testing phases
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+
+
+
+
+##2024-08-06
+^(doh|dot|dns|rdns)[-.]
+
+##2024-10-07
+\.akadns\.net$
+
+## 2025-05-14
+(^|\.)sentry\.io$
+
+##2025-08-20
+(^|\.)adzerk\.net$
+
+## end
+

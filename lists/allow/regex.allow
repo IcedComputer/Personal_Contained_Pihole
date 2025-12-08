@@ -1,0 +1,34 @@
+################################################################################
+# Pi-hole Configuration File
+# File: regex.allow
+# Type: Regex Allowlist
+# Category: Pattern-based Exceptions
+# Repository: Personal_Contained_Pihole/lists/allow/
+# 
+# Created: 2020-07-03
+# Organized: 2025-12-07
+# Last Modified: 2024-11-18
+# Version: 1.0.0
+#
+# Description: 
+#   Regex patterns for allowlisting domains matching specific patterns.
+#   Includes Microsoft/Apple/Google CDN patterns, cloud storage providers,
+#   and other legitimate services that may be caught by overly broad blocks.
+#
+# Usage:
+#   Automatically loaded by Pi-hole during gravity updates
+#   Updates via: sudo bash /scripts/Finished/updates.sh
+#
+################################################################################
+(-|\.)apple\.com\.akadns\.net$
+(-|\.)godaddy\.com\.akadns\.net$
+(-|\.)microsoft\.com\.akadns\.net$
+[0-9]*\.tlu\.dl\.delivery\.mp\.microsoft\.com$
+[A-Za-z]*[0-9]*-ssl\.ls\.apple\.com$
+\.1drv\.com$
+\.jibe\.google\.com$
+\.rcs\.telephony\.goog$
+\.storage\.live\.com$
+ip[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\.ahcdn\.com$
+
+## end

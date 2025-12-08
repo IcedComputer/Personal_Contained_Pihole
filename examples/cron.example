@@ -1,0 +1,149 @@
+################################################################################
+# Pi-hole Cron Jobs Example
+# File: cron.example
+# Category: Example Configuration
+# 
+# Description:
+#   Example cron jobs for Pi-hole automated maintenance.
+#   These are automatically configured by the installer with randomized times.
+#   Use this file as reference for manual cron configuration.
+#
+# Installation:
+#   Installer automatically configures these during setup.
+#   Times are randomized ±45 minutes to reduce load on list sources.
+#
+# Manual Configuration:
+#   sudo crontab -e
+#   Copy and customize times as needed
+#
+################################################################################
+
+# ============================================================================
+# AUTOMATICALLY CONFIGURED BY INSTALLER
+# ============================================================================
+# The installer configures three main cron jobs with randomized times:
+#
+# 1. Full Update (purge-and-update)
+#    - Runs once daily around 3:30 AM ±45 minutes
+#    - Clears all lists and rebuilds from scratch
+#    - Ensures database consistency
+#
+# 2. Allow List Update (allow-update)
+#    - Runs every 8 hours
+#    - Updates whitelist/allowlist only
+#    - Quick, non-disruptive
+#
+# 3. Gravity Refresh (pihole updateGravity)
+#    - Runs 1-3 hours before purge-and-update
+#    - Updates Pi-hole's gravity database
+#    - Prepares for full update
+#
+# Example randomized schedule (actual times vary per installation):
+# 47 3 * * * /usr/bin/bash /scripts/Finished/updates.sh purge-and-update >/dev/null 2>&1
+# 47 */8 * * * /usr/bin/bash /scripts/Finished/updates.sh allow-update >/dev/null 2>&1
+# 17 2 * * * /usr/bin/pihole updateGravity >/dev/null 2>&1
+
+# ============================================================================
+# MANUAL CRON JOB EXAMPLES
+# ============================================================================
+
+# --- Full Update (Daily at 3:30 AM) ---
+# 30 3 * * * /usr/bin/bash /scripts/Finished/updates.sh purge-and-update >/dev/null 2>&1
+
+# --- Allow Update (Every 8 hours: 12 AM, 8 AM, 4 PM) ---
+# 0 */8 * * * /usr/bin/bash /scripts/Finished/updates.sh allow-update >/dev/null 2>&1
+
+# --- Quick Update (Every 6 hours, lists only, no scripts) ---
+# 0 */6 * * * /usr/bin/bash /scripts/Finished/updates.sh quick-update >/dev/null 2>&1
+
+# --- Gravity Refresh (1 hour before full update) ---
+# 30 2 * * * /usr/bin/pihole updateGravity >/dev/null 2>&1
+
+# --- Script Refresh (Weekly, Monday at 4 AM) ---
+# 0 4 * * 1 /usr/bin/bash /scripts/Finished/refresh.sh >/dev/null 2>&1
+
+# --- Regex Update (Daily at 2 AM) ---
+# 0 2 * * * /usr/bin/bash /scripts/Finished/updates.sh block-regex-update >/dev/null 2>&1
+
+# ============================================================================
+# WIREGUARD VPN CRON JOBS (if VPN installed)
+# ============================================================================
+
+# --- No automatic cron jobs for WireGuard ---
+# WireGuard is managed via systemd service: wg-quick@wg0
+# Use wireguard-manager.sh for client management
+# sudo bash /scripts/Finished/wireguard-manager.sh
+
+# ============================================================================
+# CLOUDFLARED CRON JOBS (if using Cloudflared)
+# ============================================================================
+
+# --- Cloudflared Restart (Every 5 minutes) ---
+# Automatically configured by installer
+# */5 * * * * /bin/systemctl restart cloudflared >/dev/null 2>&1
+
+# ============================================================================
+# UNBOUND CRON JOBS (if using Unbound)
+# ============================================================================
+
+# --- Root Hints Update (Monthly, 1st day at 5 AM) ---
+# Automatically configured by installer
+# 0 5 1 * * /usr/bin/bash /scripts/Finished/unbound_root_hints_update.sh >/dev/null 2>&1
+
+# ============================================================================
+# CUSTOM CRON JOBS
+# ============================================================================
+
+# --- Reboot Reminder (Check updates.sh log) ---
+# Check if reboot is needed after updates
+# 0 6 * * * grep -q "REBOOT REQUIRED" /var/log/pihole-updates.log && echo "Reboot needed" | mail -s "Pi-hole Reboot Required" root
+
+# --- Backup Configuration (Weekly, Sunday at 2 AM) ---
+# 0 2 * * 0 tar -czf /root/pihole-backup-$(date +\%Y\%m\%d).tar.gz /etc/pihole /scripts/Finished/CONFIG
+
+# --- Clean Old Backups (Monthly, keep last 6 months) ---
+# 0 3 1 * * find /root -name "pihole-backup-*.tar.gz" -mtime +180 -delete
+
+# ============================================================================
+# LOGGING OPTIONS
+# ============================================================================
+
+# Redirect output to log file:
+# 30 3 * * * /usr/bin/bash /scripts/Finished/updates.sh purge-and-update >>/var/log/pihole-updates.log 2>&1
+
+# Send email on errors (requires mail configured):
+# 30 3 * * * /usr/bin/bash /scripts/Finished/updates.sh purge-and-update 2>&1 | grep -i error | mail -s "Pi-hole Update Errors" root
+
+# Silent (no output):
+# 30 3 * * * /usr/bin/bash /scripts/Finished/updates.sh purge-and-update >/dev/null 2>&1
+
+# ============================================================================
+# CRON TIME FORMAT REFERENCE
+# ============================================================================
+# * * * * * command to execute
+# │ │ │ │ │
+# │ │ │ │ └─── Day of week (0-7, 0 and 7 are Sunday)
+# │ │ │ └───── Month (1-12)
+# │ │ └─────── Day of month (1-31)
+# │ └───────── Hour (0-23)
+# └─────────── Minute (0-59)
+#
+# Examples:
+# */5 * * * *     - Every 5 minutes
+# 0 */2 * * *     - Every 2 hours (at :00)
+# 30 3 * * *      - Every day at 3:30 AM
+# 0 9 * * 1       - Every Monday at 9:00 AM
+# 0 0 1 * *       - First day of every month at midnight
+# 0 6 1 1 *       - January 1st at 6:00 AM
+
+# ============================================================================
+# BEST PRACTICES
+# ============================================================================
+# 1. Use absolute paths for all commands and scripts
+# 2. Redirect output to /dev/null or log file to avoid cron emails
+# 3. Test commands manually before adding to cron
+# 4. Stagger times for multiple cron jobs to avoid resource conflicts
+# 5. Use randomized minutes (not :00) to reduce load on sources
+# 6. Consider system load - avoid scheduling intensive tasks together
+# 7. Use "sudo crontab -e" for root cron jobs (required for Pi-hole)
+# 8. Verify cron daemon is running: systemctl status cron
