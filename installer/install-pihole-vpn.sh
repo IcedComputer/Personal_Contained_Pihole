@@ -55,6 +55,10 @@ readonly PATH_FINISHED="/scripts/Finished"
 readonly PATH_CONFIG="/scripts/Finished/CONFIG"
 readonly PATH_PIHOLE="/etc/pihole"
 
+# GitHub repository base URLs
+readonly GITHUB_REPO="https://github.com/IcedComputer/Personal_Contained_Pihole"
+readonly GITHUB_RAW="${GITHUB_REPO}/raw/refs/heads/main"
+
 # WireGuard paths
 readonly WIREGUARD_DIR="/etc/wireguard"
 readonly WIREGUARD_CONFIG="${WIREGUARD_DIR}/wg0.conf"
@@ -645,8 +649,8 @@ EOF
 download_public_gpg_keys() {
     log_info "Downloading public GPG keys from repository..."
     
-    local github_key_dir="${GITHUB_REPO}/raw/refs/heads/main/installer/public-gpg-keys"
-    local dest_dir="${PATH_FINISHED}/public-gpg-keys"
+    local github_key_dir="${GITHUB_RAW}/installer/public-gpg-keys"
+    local dest_dir="${PATH_CONFIG}/public-gpg-keys"
     
     # Create destination directory
     mkdir -p "${dest_dir}"
@@ -655,7 +659,7 @@ download_public_gpg_keys() {
     log_info "Fetching key list from repository..."
     
     # Download using the GitHub API to list files
-    local api_url="https://api.github.com/repos/${GITHUB_REPO#https://github.com/}/contents/installer/public-gpg-keys"
+    local api_url="https://api.github.com/repos/IcedComputer/Personal_Contained_Pihole/contents/installer/public-gpg-keys"
     
     local key_files=$(curl -s "${api_url}" | grep -oP '"name":\s*"\K[^"]+\.(?:gpg|asc|key)' || true)
     
@@ -697,7 +701,7 @@ download_public_gpg_keys() {
 import_gpg_keys() {
     log_info "Auto-importing GPG public keys..."
     
-    local keys_dir="${PATH_FINISHED}/public-gpg-keys"
+    local keys_dir="${PATH_CONFIG}/public-gpg-keys"
     local imported_count=0
     local failed_count=0
     
@@ -1026,7 +1030,7 @@ EOF
     fi
     
     # Generate Cloudflared systemd service locally
-    cat > /lib/systemd/system/cloudflared.service << 'EOF'
+    cat > /lib/systemd/system/cloudflared.service << EOF
 [Unit]
 Description=cloudflared DNS over HTTPS proxy
 After=syslog.target network-online.target
@@ -1034,8 +1038,8 @@ After=syslog.target network-online.target
 [Service]
 Type=simple
 User=root
-EnvironmentFile=/scripts/Finished/cloudflared
-ExecStart=/usr/local/bin/cloudflared proxy-dns $CLOUDFLARED_OPTS
+EnvironmentFile=${PATH_FINISHED}/cloudflared
+ExecStart=/usr/local/bin/cloudflared proxy-dns \$CLOUDFLARED_OPTS
 Restart=on-failure
 RestartSec=10
 KillMode=process
@@ -1085,7 +1089,7 @@ EOF
 install_update_scripts() {
     log_info "Installing optimized update scripts..."
     
-    local repo_base="https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master"
+    local repo_base="${GITHUB_REPO}/raw/refs/heads/master"
     
     # Download updates.sh
     if curl --tlsv1.3 -f -o "${PATH_FINISHED}/updates.sh" \
@@ -1422,7 +1426,7 @@ install_wireguard_helpers() {
     else
         # Download if not present
         if curl --tlsv1.3 -o "${PATH_FINISHED}/wireguard-manager.sh" \
-            'https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/scripts/wireguard-manager.sh' 2>/dev/null; then
+            "${GITHUB_REPO}/raw/refs/heads/master/scripts/wireguard-manager.sh" 2>/dev/null; then
             chmod +x "${PATH_FINISHED}/wireguard-manager.sh"
             log_success "Downloaded wireguard-manager.sh"
         else

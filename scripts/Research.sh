@@ -36,7 +36,7 @@ readonly OUTPUT_DIR="${TEMPDIR}"
 # Output files with descriptive names
 readonly ALLOWED_FILE="${OUTPUT_DIR}/dns_allowed_domains.txt"
 readonly REGEX_BLOCKED_FILE="${OUTPUT_DIR}/regex_blocked_domains.txt"
-BLOCKLIST_BLOCKED_FILE="${OUTPUT_DIR}/blocklist_blocked_domains.txt"
+readonly BLOCKLIST_BLOCKED_FILE="${OUTPUT_DIR}/blocklist_blocked_domains.txt"
 
 # Ensure temp directory exists
 mkdir -p "${OUTPUT_DIR}"

@@ -22,14 +22,14 @@ readonly COLOR_BLUE='\033[0;34m'
 readonly COLOR_RESET='\033[0m'
 
 # Paths
-WIREGUARD_DIR="/etc/wireguard"
-CONFIG_FILE="${WIREGUARD_DIR}/wg0.conf"
-CLIENTS_DIR="${WIREGUARD_DIR}/clients"
+readonly WIREGUARD_DIR="/etc/wireguard"
+readonly CONFIG_FILE="${WIREGUARD_DIR}/wg0.conf"
+readonly CLIENTS_DIR="${WIREGUARD_DIR}/clients"
 
 # WireGuard network configuration
-WIREGUARD_SERVER_NETWORK="10.7.0"
-WIREGUARD_SERVER_IP="${WIREGUARD_SERVER_NETWORK}.1"
-WIREGUARD_CIDR="24"
+readonly WIREGUARD_SERVER_NETWORK="10.7.0"
+readonly WIREGUARD_SERVER_IP="${WIREGUARD_SERVER_NETWORK}.1"
+readonly WIREGUARD_CIDR="24"
 
 # Helper functions
 log_success() {
