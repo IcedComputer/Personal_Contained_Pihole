@@ -103,7 +103,7 @@ Personal_Contained_Pihole/
 │   └── blocks/                      # Additional blocklists
 └── docs/
     ├── INSTALL.md                   # Installation guide
-    ├── GITHUB_AUTH_SETUP.md         # Authentication setup
+    ├── AI-CONTEXT.md                # AI assistant context
     └── WIREGUARD-SECURITY.md        # VPN security guide
 ```
 

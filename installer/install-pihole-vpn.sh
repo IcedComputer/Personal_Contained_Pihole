@@ -57,7 +57,9 @@ readonly PATH_PIHOLE="/etc/pihole"
 
 # GitHub repository base URLs
 readonly GITHUB_REPO="https://github.com/IcedComputer/Personal_Contained_Pihole"
-readonly GITHUB_RAW="${GITHUB_REPO}/raw/refs/heads/main"
+readonly GITHUB_RAW="https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole"
+readonly GITHUB_RAW_MASTER="${GITHUB_RAW}/master"
+readonly GITHUB_RAW_MAIN="${GITHUB_RAW}/main"
 
 # WireGuard paths
 readonly WIREGUARD_DIR="/etc/wireguard"
@@ -649,7 +651,7 @@ EOF
 download_public_gpg_keys() {
     log_info "Downloading public GPG keys from repository..."
     
-    local github_key_dir="${GITHUB_RAW}/installer/public-gpg-keys"
+    local github_key_dir="${GITHUB_RAW_MAIN}/installer/public-gpg-keys"
     local dest_dir="${PATH_CONFIG}/public-gpg-keys"
     
     # Create destination directory
@@ -1089,7 +1091,7 @@ EOF
 install_update_scripts() {
     log_info "Installing optimized update scripts..."
     
-    local repo_base="${GITHUB_REPO}/raw/refs/heads/master"
+    local repo_base="https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master"
     
     # Download updates.sh
     if curl --tlsv1.3 -f -o "${PATH_FINISHED}/updates.sh" \
@@ -1426,7 +1428,7 @@ install_wireguard_helpers() {
     else
         # Download if not present
         if curl --tlsv1.3 -o "${PATH_FINISHED}/wireguard-manager.sh" \
-            "${GITHUB_REPO}/raw/refs/heads/master/scripts/wireguard-manager.sh" 2>/dev/null; then
+            "https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/scripts/wireguard-manager.sh" 2>/dev/null; then
             chmod +x "${PATH_FINISHED}/wireguard-manager.sh"
             log_success "Downloaded wireguard-manager.sh"
         else
