@@ -138,28 +138,23 @@ WIREGUARD_PORT="51820"
 # GPG KEY CONFIGURATION (OPTIONAL)
 # ============================================================================
 
-# Number of GPG public keys to import for encrypted list decryption
-# Valid range: 0-5
-# Set to 0 if not using encrypted lists
-# Set to number of different keys you need to import
+# GPG Public Keys - Auto-Import
+#
+# Public GPG keys are automatically imported from: installer/public-gpg-keys/
 #
 # Background:
 #   Some lists (e.g., country.regex.gpg) are encrypted for privacy.
 #   During installation, the installer:
 #     1. Generates a new GPG key pair for THIS server
 #     2. Exports public key to /scripts/Finished/server-public-key.gpg
-#     3. Prompts to import N public keys from other sources
+#     3. Auto-imports ALL .gpg files from installer/public-gpg-keys/ directory
 #
-# Workflow:
-#   - Set GPG_KEY_COUNT=1 if you have 1 source providing encrypted files
-#   - Set GPG_KEY_COUNT=0 if not using encrypted lists
-#   - The installer will prompt for each key file path or URL
+# To add keys:
+#   1. Export your public key: gpg --export --armor email@example.com > mykey.gpg
+#   2. Copy to: installer/public-gpg-keys/mykey.gpg
+#   3. Commit to repository (public keys are safe to share)
 #
-# Example:
-#   You encrypt country.regex with your personal key → Set GPG_KEY_COUNT=1
-#   Installer will ask: "Enter full path to public key file:"
-#
-GPG_KEY_COUNT=1
+# No configuration variable needed - keys are imported automatically!
 
 # ============================================================================
 # SECURITY CONFIGURATION (OPTIONAL)
@@ -279,14 +274,12 @@ PIHOLE_VERSION="6"
 #DNS_TYPE="unbound"
 #INSTALL_VPN="yes"
 #WIREGUARD_PORT="51820"
-#GPG_KEY_COUNT=1
 
 # Example 2: Azure Ubuntu with Cloudflared, Security Only, No VPN
 #PLATFORM="azure"
 #SERVER_TYPE="security"
 #DNS_TYPE="cloudflared"
 #INSTALL_VPN="no"
-#GPG_KEY_COUNT=0
 
 # Example 3: Any Linux with Unbound, Basic Protection, VPN on Custom Port
 #PLATFORM="other"
@@ -295,7 +288,6 @@ PIHOLE_VERSION="6"
 #INSTALL_VPN="yes"
 #WIREGUARD_PORT="45678"
 #STATIC_IPV4="192.168.1.100"
-#GPG_KEY_COUNT=2
 
 # ============================================================================
 # END OF CONFIGURATION

@@ -43,7 +43,7 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 2. **Private Repository Support** - GitHub authentication for sensitive configurations
 3. **Automated Maintenance** - Self-updating scripts with randomized cron schedules
 4. **Security Hardening** - Progressive Fail2Ban, SSH hardening, MFA support
-5. **Encrypted Lists** - GPG-based list encryption for privacy
+5. **Encrypted Lists** - GPG-based list encryption with automatic key management
 6. **Multiple Profiles** - Full protection, security-only, or basic configurations
 
 ### Project Scale
@@ -121,7 +121,7 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
    - Basic installation works without optional features
    - VPN is optional (INSTALL_VPN="no")
    - MFA is optional (ENABLE_MFA="no")
-   - GPG encryption is optional (GPG_KEY_COUNT=0)
+   - GPG encryption is optional (place keys in installer/public-gpg-keys/)
 
 5. **Security by Default**
    - Token files: 600 permissions (root-only)
@@ -178,7 +178,7 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 7. Generate configuration files (type.conf, dns_type.conf, test.conf, ver.conf)
 8. System update and dependencies
 9. Security setup (unattended-upgrades, Fail2Ban, SSH)
-10. GPG key generation and import
+10. GPG key generation and auto-import from installer/public-gpg-keys/
 11. Pi-hole installation
 12. DNS provider (Unbound or Cloudflared)
 13. Update scripts installation
@@ -481,7 +481,6 @@ Only:
 - `PLATFORM` - azure/rpi/other (auto-detected)
 - `WIREGUARD_PORT` - Default 51820
 - `STATIC_IPV4` - Auto-detected if not set
-- `GPG_KEY_COUNT` - 0-5, default 0
 - `ENABLE_MFA` - yes/no, default no
 - `REAL_USER` - Auto-detected from SUDO_USER
 - `DEBUG_MODE` - true/false, default false
@@ -656,8 +655,16 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 
 **Layer 6: Credential Management**
 - GitHub tokens: Secured, no logging, expiration tracking
-- GPG keys: Password-protected private keys
+- GPG keys: Automatic import from installer/public-gpg-keys/, password-protected private keys
 - WireGuard keys: Pre-shared keys for all clients
+
+**Layer 6a: GPG Key Auto-Management**
+- Public keys stored in: `installer/public-gpg-keys/*.gpg`
+- Auto-imported during installation (no user prompts)
+- Auto-checked and updated during `full-update` and `purge-and-update`
+- Fingerprint-based comparison prevents duplicate imports
+- Cached in: `/scripts/Finished/CONFIG/public-gpg-keys/`
+- Updates script checks GitHub for new keys automatically
 
 **Layer 7: System Updates**
 - Unattended-upgrades: Security patches automatic
@@ -955,7 +962,7 @@ sudo chown root:root /scripts/Finished/CONFIG/github_token.conf
 **Symptom:** country.regex.gpg fails to decrypt
 
 **Causes:**
-- GPG key not imported
+- GPG key not available in installer/public-gpg-keys/
 - Wrong key imported
 - Key expired
 - Insufficient permissions
@@ -967,10 +974,14 @@ gpg --list-keys
 
 # Try manual decryption
 gpg --decrypt /scripts/temp/country.regex.gpg
+
+# Check if keys exist in repository
+ls -la /path/to/pihole-installer/installer/public-gpg-keys/
 ```
 
 **Fix:**
-- Re-import correct public key
+- Add correct .gpg public key file to installer/public-gpg-keys/
+- Run installation or updates to auto-import
 - Check key hasn't expired
 - Verify key matches encrypted file's recipient
 

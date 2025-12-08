@@ -155,6 +155,96 @@ check_gpg_keys() {
     return 0
 }
 
+check_and_import_new_keys() {
+    log "Checking for new GPG public keys..."
+    debug_log "check_and_import_new_keys: Starting"
+    
+    local keys_cache_dir="$CONFIG/public-gpg-keys"
+    mkdir -p "$keys_cache_dir"
+    
+    # Get list of .gpg files from GitHub repository
+    debug_log "Fetching key list from GitHub..."
+    
+    # Try to get directory listing (GitHub API would be better, but this works)
+    # We'll download each key and compare fingerprints
+    local keys_to_check=(
+        "encrypt.allow.gpg"
+        "civic.allow.gpg"
+        "financial.allow.gpg"
+        "international.allow.gpg"
+        "medical.allow.gpg"
+        "tech.allow.gpg"
+    )
+    
+    local imported_count=0
+    local skipped_count=0
+    local failed_count=0
+    
+    # Get currently imported key fingerprints
+    local current_fingerprints=$(gpg --list-keys --fingerprint 2>/dev/null | grep -E "^[[:space:]]+Key fingerprint" | awk -F= '{print $2}' | tr -d ' ' || echo "")
+    debug_log "Current GPG fingerprints in keyring: $(echo "$current_fingerprints" | wc -l) keys"
+    
+    # Check each potential key file
+    for key_file in "${keys_to_check[@]}"; do
+        local key_url="${REPO_BASE_BINARY}/installer/public-gpg-keys/${key_file}"
+        local cache_path="$keys_cache_dir/${key_file}"
+        
+        debug_log "Checking key: $key_file"
+        
+        # Download key to cache
+        if curl --tlsv1.3 --fail --location --connect-timeout 10 --max-time 30 \
+            --silent -o "$cache_path" "$key_url" 2>/dev/null; then
+            
+            debug_success "Downloaded: $key_file"
+            
+            # Extract fingerprint from downloaded key (without importing)
+            local new_fingerprint=$(gpg --with-colons --import-options show-only --import "$cache_path" 2>/dev/null | \
+                grep "^fpr:" | cut -d: -f10 | head -n1)
+            
+            if [[ -z "$new_fingerprint" ]]; then
+                log_warning "Could not extract fingerprint from $key_file"
+                ((failed_count++))
+                continue
+            fi
+            
+            debug_log "Key fingerprint: $new_fingerprint"
+            
+            # Check if already imported
+            if echo "$current_fingerprints" | grep -q "$new_fingerprint"; then
+                debug_log "Key already imported: $key_file"
+                ((skipped_count++))
+            else
+                # Import new key
+                if gpg --import "$cache_path" 2>&1 | tee -a "$LOGFILE" >/dev/null; then
+                    log_success "Imported new key: $key_file"
+                    ((imported_count++))
+                else
+                    log_error "Failed to import: $key_file"
+                    ((failed_count++))
+                fi
+            fi
+        else
+            # File doesn't exist on GitHub (not an error, just not available)
+            debug_log "Key not found on GitHub: $key_file (this is normal if not using this key)"
+        fi
+    done
+    
+    # Summary
+    if [[ $imported_count -gt 0 ]] || [[ $failed_count -gt 0 ]]; then
+        log "GPG Key Update Summary:"
+        log "  New keys imported: $imported_count"
+        log "  Already imported: $skipped_count"
+        if [[ $failed_count -gt 0 ]]; then
+            log_warning "  Failed imports: $failed_count"
+        fi
+    else
+        debug_log "No new GPG keys to import"
+    fi
+    
+    debug_log "check_and_import_new_keys: Completed"
+    return 0
+}
+
 print_banner() {
     local color="$1"
     local message="$2"
@@ -1407,6 +1497,9 @@ cmd_full_update() {
     log "=== Starting full update ==="
     debug_log "cmd_full_update: Comprehensive update with all components"
     
+    # Check and import new GPG keys
+    check_and_import_new_keys || log_warning "GPG key check had issues"
+    
     # System update
     system_update || log_warning "System update had issues"
     
@@ -1513,6 +1606,9 @@ cmd_quick_update() {
 cmd_purge_and_update() {
     log "=== Starting purge and full update ==="
     log "WARNING: This will clear all existing Pi-hole lists and rebuild from scratch"
+    
+    # Check and import new GPG keys first
+    check_and_import_new_keys || log_warning "GPG key check had issues"
     
     # Purge existing database
     purge_database || {

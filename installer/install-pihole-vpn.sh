@@ -76,7 +76,6 @@ WIREGUARD_PORT=""        # Default 51820
 PIHOLE_VERSION="6"       # Always install latest (v6)
 DETECTED_IPV4=""
 STATIC_IPV4=""
-GPG_KEY_COUNT=0
 REAL_USER=""             # Actual user (not root) who ran sudo
 ENABLE_MFA=""            # "yes" or "no" for 2FA setup
 REPAIR_MODE=false        # If true, skip completed steps
@@ -382,7 +381,6 @@ show_config_summary() {
     echo "  Install VPN:       ${INSTALL_VPN}"
     echo "  WireGuard Port:    ${WIREGUARD_PORT}"
     echo "  Static IPv4:       ${STATIC_IPV4}"
-    echo "  GPG Keys to Import: ${GPG_KEY_COUNT}"
     echo ""
 }
 
@@ -470,17 +468,6 @@ prompt_configuration() {
             ;;
     esac
     log_success "Static IPv4: ${STATIC_IPV4}"
-    
-    # GPG Keys
-    echo ""
-    read -p "How many GPG public keys do you need to import for encrypted lists? [0-5]: " key_count
-    if [[ "${key_count}" =~ ^[0-5]$ ]]; then
-        GPG_KEY_COUNT="${key_count}"
-    else
-        log_warning "Invalid count, setting to 0"
-        GPG_KEY_COUNT=0
-    fi
-    log_success "GPG keys to import: ${GPG_KEY_COUNT}"
     
     # Multi-Factor Authentication
     echo ""
@@ -656,58 +643,58 @@ EOF
 }
 
 import_gpg_keys() {
-    if [[ ${GPG_KEY_COUNT} -eq 0 ]]; then
-        log_info "No GPG keys to import"
+    log_info "Auto-importing GPG public keys..."
+    
+    local keys_dir="${SCRIPT_DIR}/public-gpg-keys"
+    local imported_count=0
+    local failed_count=0
+    
+    # Check if directory exists
+    if [[ ! -d "${keys_dir}" ]]; then
+        log_warning "GPG keys directory not found: ${keys_dir}"
+        log_warning "No public keys available for import"
         return 0
     fi
     
-    log_info "Importing ${GPG_KEY_COUNT} GPG public key(s)..."
+    # Find all .gpg files
+    local key_files=("${keys_dir}"/*.gpg)
     
-    for ((i=1; i<=GPG_KEY_COUNT; i++)); do
-        echo ""
-        echo "╔══════════════════════════════════════════════════════════════╗"
-        echo "║                  IMPORT GPG KEY ${i}/${GPG_KEY_COUNT}                      ║"
-        echo "╚══════════════════════════════════════════════════════════════╝"
-        echo ""
-        echo "Choose import method:"
-        echo "1) From file (provide path)"
-        echo "2) Paste key content directly"
-        read -p "Enter choice [1-2]: " import_choice
+    # Check if any keys exist
+    if [[ ! -e "${key_files[0]}" ]]; then
+        log_warning "No GPG key files found in ${keys_dir}"
+        log_warning "To add keys, place .gpg files in: ${keys_dir}"
+        log_info "Installation will continue, but encrypted lists will fail to decrypt"
+        return 0
+    fi
+    
+    log_info "Found ${#key_files[@]} key file(s) to import"
+    
+    # Import each key
+    for key_file in "${key_files[@]}"; do
+        local key_name=$(basename "${key_file}")
+        log_info "Importing: ${key_name}"
         
-        case $import_choice in
-            1)
-                read -p "Enter full path to public key file: " key_file
-                if [[ -f "${key_file}" ]]; then
-                    if gpg --import "${key_file}" 2>&1 | tee -a "${LOG_FILE}"; then
-                        log_success "Imported key from ${key_file}"
-                    else
-                        log_warning "Failed to import key from ${key_file}"
-                    fi
-                else
-                    log_warning "File not found: ${key_file}"
-                fi
-                ;;
-            2)
-                echo "Paste the GPG public key (including -----BEGIN PGP PUBLIC KEY BLOCK-----)"
-                echo "Press Ctrl+D when done:"
-                local key_content=$(cat)
-                echo "${key_content}" | gpg --import 2>&1 | tee -a "${LOG_FILE}"
-                if [[ $? -eq 0 ]]; then
-                    log_success "Imported key from pasted content"
-                else
-                    log_warning "Failed to import pasted key"
-                fi
-                ;;
-            *)
-                log_warning "Invalid choice, skipping key ${i}"
-                ;;
-        esac
+        if gpg --import "${key_file}" 2>&1 | tee -a "${LOG_FILE}"; then
+            log_success "Imported: ${key_name}"
+            ((imported_count++))
+        else
+            log_error "Failed to import: ${key_name}"
+            ((failed_count++))
+        fi
     done
+    
+    # Summary
+    echo ""
+    log_info "GPG Key Import Summary:"
+    log_info "  Successfully imported: ${imported_count}"
+    if [[ ${failed_count} -gt 0 ]]; then
+        log_warning "  Failed imports: ${failed_count}"
+    fi
     
     # List imported keys
     echo ""
     log_info "Currently imported GPG keys:"
-    gpg --list-keys | tee -a "${LOG_FILE}"
+    gpg --list-keys 2>&1 | tee -a "${LOG_FILE}"
     echo ""
     sleep 2
 }
@@ -805,24 +792,37 @@ server:
 EOF
     log_success "Generated Unbound Pi-hole configuration"
     
-    # Generate dnsmasq Unbound configuration locally
+    # Disable unbound-resolvconf service BEFORE starting (prevents DNS conflicts)
+    systemctl disable --now unbound-resolvconf.service 2>/dev/null || true
+    sed -Ei 's/^unbound_conf=/#unbound_conf=/' /etc/resolvconf.conf 2>/dev/null || true
+    rm -f /etc/unbound/unbound.conf.d/resolvconf_resolvers.conf 2>/dev/null || true
+    
+    # Start unbound service (root hints were downloaded before package installation)
+    if systemctl restart unbound; then
+        log_success "Unbound service started"
+    else
+        log_error "Failed to start Unbound service"
+        return 1
+    fi
+    
+    # Generate dnsmasq Unbound configuration (Pi-hole must be installed first)
+    if [[ ! -d /etc/dnsmasq.d ]]; then
+        log_error "ERROR: /etc/dnsmasq.d directory not found - Pi-hole may not be installed correctly"
+        return 1
+    fi
+    
     cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
 server=127.0.0.1#5335
 edns-packet-max=1232
 EOF
     log_success "Generated dnsmasq Unbound configuration"
     
-    # Disable unbound-resolvconf service
-    systemctl disable --now unbound-resolvconf.service 2>/dev/null || true
-    sed -Ei 's/^unbound_conf=/#unbound_conf=/' /etc/resolvconf.conf 2>/dev/null || true
-    rm -f /etc/unbound/unbound.conf.d/resolvconf_resolvers.conf 2>/dev/null || true
-    
-    # Start unbound (root hints were downloaded before package installation)
-    if service unbound restart; then
-        log_success "Unbound service started"
+    # Restart dnsmasq to apply unbound configuration
+    if systemctl is-active --quiet pihole-FTL; then
+        systemctl restart pihole-FTL
+        log_success "Restarted Pi-hole FTL to apply Unbound configuration"
     else
-        log_error "Failed to start Unbound service"
-        return 1
+        log_warning "Pi-hole FTL not running - configuration will apply on next start"
     fi
     
     # Create root hints update script
@@ -987,11 +987,7 @@ WantedBy=multi-user.target
 EOF
     log_success "Generated Cloudflared systemd service"
     
-    # Generate dnsmasq Cloudflared configuration locally
-    echo "server=127.0.0.1#5053" > /etc/dnsmasq.d/50-cloudflared.conf
-    log_success "Generated dnsmasq Cloudflared configuration"
-    
-    # Enable and start service
+    # Enable and start Cloudflared service
     systemctl enable cloudflared
     if systemctl start cloudflared; then
         log_success "Cloudflared service started"
@@ -1000,13 +996,28 @@ EOF
         return 1
     fi
     
+    # Generate dnsmasq Cloudflared configuration (Pi-hole must be installed first)
+    if [[ ! -d /etc/dnsmasq.d ]]; then
+        log_error "ERROR: /etc/dnsmasq.d directory not found - Pi-hole may not be installed correctly"
+        return 1
+    fi
+    
+    echo "server=127.0.0.1#5053" > /etc/dnsmasq.d/50-cloudflared.conf
+    log_success "Generated dnsmasq Cloudflared configuration"
+    
+    # Restart Pi-hole FTL to apply cloudflared configuration
+    if systemctl is-active --quiet pihole-FTL; then
+        systemctl restart pihole-FTL
+        log_success "Restarted Pi-hole FTL to apply Cloudflared configuration"
+    else
+        log_warning "Pi-hole FTL not running - configuration will apply on next start"
+    fi
+    
     # Fix Pi-hole config for Cloudflared
     sed -i "s/PIHOLE_DNS/#PIHOLE_DNS/g" /etc/pihole/setupVars.conf 2>/dev/null || true
     sed -i "s/server=8.8/#server=8.8/g" /etc/dnsmasq.d/01-pihole.conf 2>/dev/null || true
     
-    # Schedule restart every 5 minutes (from original script)
-    (crontab -l 2>/dev/null; echo "*/5 * * * * /bin/systemctl restart cloudflared") | crontab -
-    log_success "Scheduled Cloudflared periodic restart"
+    log_success "Cloudflared installation completed (restart scheduled in cron setup)"
 }
 
 # ============================================================================
@@ -1078,24 +1089,20 @@ setup_cron_jobs() {
     
     log_info "purge-and-update scheduled at: $(printf "%02d:%02d" ${purge_hour} ${purge_minute})"
     
-    # Calculate allow-update times (every 8 hours, offset from purge time)
-    local allow_time1_minutes=${purge_total_minutes}
-    local allow_time2_minutes=$((allow_time1_minutes + 480))  # +8 hours
-    local allow_time3_minutes=$((allow_time2_minutes + 480))  # +8 hours
+    # Calculate allow-update times (8 and 16 hours after purge)
+    local allow_time1_minutes=$((purge_total_minutes + 480))  # +8 hours after purge
+    local allow_time2_minutes=$((purge_total_minutes + 960))  # +16 hours after purge
     
     # Wrap around 24 hours
     allow_time1_minutes=$((allow_time1_minutes % 1440))
     allow_time2_minutes=$((allow_time2_minutes % 1440))
-    allow_time3_minutes=$((allow_time3_minutes % 1440))
     
     local allow_hour1=$((allow_time1_minutes / 60))
     local allow_minute1=$((allow_time1_minutes % 60))
     local allow_hour2=$((allow_time2_minutes / 60))
     local allow_minute2=$((allow_time2_minutes % 60))
-    local allow_hour3=$((allow_time3_minutes / 60))
-    local allow_minute3=$((allow_time3_minutes % 60))
     
-    log_info "allow-update scheduled at: $(printf "%02d:%02d" ${allow_hour1} ${allow_minute1}), $(printf "%02d:%02d" ${allow_hour2} ${allow_minute2}), $(printf "%02d:%02d" ${allow_hour3} ${allow_minute3})"
+    log_info "allow-update scheduled at: $(printf "%02d:%02d" ${allow_hour1} ${allow_minute1}), $(printf "%02d:%02d" ${allow_hour2} ${allow_minute2})"
     
     # Calculate refresh time (1-3 hours before purge-and-update)
     local refresh_offset=$((RANDOM % 121 + 60))  # 60-180 minutes before
@@ -1108,15 +1115,37 @@ setup_cron_jobs() {
     
     log_info "refresh (gravity update) scheduled at: $(printf "%02d:%02d" ${refresh_hour} ${refresh_minute})"
     
+    # Calculate reboot time (45 minutes after purge-and-update)
+    local reboot_total_minutes=$((purge_total_minutes + 45))
+    reboot_total_minutes=$((reboot_total_minutes % 1440))  # Wrap around 24 hours
+    local reboot_hour=$((reboot_total_minutes / 60))
+    local reboot_minute=$((reboot_total_minutes % 60))
+    
+    log_info "daily reboot scheduled at: $(printf "%02d:%02d" ${reboot_hour} ${reboot_minute})"
+    
+    # Calculate Cloudflared restart time (13 hours after reboot) if using Cloudflared
+    local cloudflared_total_minutes=$((reboot_total_minutes + 780))  # +13 hours
+    cloudflared_total_minutes=$((cloudflared_total_minutes % 1440))  # Wrap around 24 hours
+    local cloudflared_hour=$((cloudflared_total_minutes / 60))
+    local cloudflared_minute=$((cloudflared_total_minutes % 60))
+    
+    if [[ "${DNS_TYPE}" == "cloudflared" ]]; then
+        log_info "cloudflared restart scheduled at: $(printf "%02d:%02d" ${cloudflared_hour} ${cloudflared_minute})"
+    fi
+    
     # Add cron jobs
     (
         crontab -l 2>/dev/null
         echo "# Pi-hole automated updates (installed $(date --iso-8601))"
         echo "${purge_minute} ${purge_hour} * * * bash ${PATH_FINISHED}/updates.sh purge-and-update >> /var/log/pihole-purge-update.log 2>&1"
-        echo "${allow_minute1} ${allow_hour1} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
-        echo "${allow_minute2} ${allow_hour2} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
-        echo "${allow_minute3} ${allow_hour3} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
+        echo "${allow_minute1} ${allow_hour1},${allow_hour2} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
         echo "${refresh_minute} ${refresh_hour} * * * bash ${PATH_FINISHED}/updates.sh refresh >> /var/log/pihole-refresh.log 2>&1"
+        echo "${reboot_minute} ${reboot_hour} * * * /sbin/reboot >> /var/log/pihole-reboot.log 2>&1"
+        
+        # Add Cloudflared restart if using Cloudflared
+        if [[ "${DNS_TYPE}" == "cloudflared" ]]; then
+            echo "${cloudflared_minute} ${cloudflared_hour} * * * /bin/systemctl restart cloudflared >> /var/log/cloudflared-restart.log 2>&1"
+        fi
     ) | crontab -
     
     log_success "Cron jobs configured successfully"
@@ -1129,11 +1158,16 @@ setup_cron_jobs() {
     echo ""
     printf "  Gravity Refresh:    %02d:%02d daily\n" ${refresh_hour} ${refresh_minute}
     printf "  Full Purge+Update:  %02d:%02d daily\n" ${purge_hour} ${purge_minute}
-    printf "  Allow List Update:  %02d:%02d, %02d:%02d, %02d:%02d daily\n" \
-        ${allow_hour1} ${allow_minute1} ${allow_hour2} ${allow_minute2} ${allow_hour3} ${allow_minute3}
+    printf "  Allow List Update:  %02d:%02d, %02d:%02d daily\n" \
+        ${allow_hour1} ${allow_minute1} ${allow_hour2} ${allow_minute2}
+    printf "  System Reboot:      %02d:%02d daily\n" ${reboot_hour} ${reboot_minute}
     
     if [[ "${DNS_TYPE}" == "unbound" ]]; then
         printf "  Unbound Root Hints: Quarterly (every 3 months)\n"
+    fi
+    
+    if [[ "${DNS_TYPE}" == "cloudflared" ]]; then
+        printf "  Cloudflared Restart: %02d:%02d daily\n" ${cloudflared_hour} ${cloudflared_minute}
     fi
     
     echo ""

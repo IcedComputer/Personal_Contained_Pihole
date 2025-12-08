@@ -235,15 +235,28 @@ Use this IP as static? [Y/n] or enter different IP:
 - Named after hostname
 - Public key exported to `/scripts/Finished/server-public-key.gpg`
 
-#### Import Encryption Keys
-If using encrypted lists from your repository:
-```
-How many GPG public keys do you need to import? [0-5]: 1
+#### Automatic Public Key Import
+Public keys are automatically imported from `installer/public-gpg-keys/`:
 
-Choose import method:
-1) From file (provide path)
-2) Paste key content directly
+**Before Installation:**
+```bash
+# Add your public keys to the repository
+cd pihole-installer/installer/public-gpg-keys/
+# Copy your .gpg public key files here
+ls -la
+# Shows: my-encryption-key.gpg, work-key.gpg, etc.
 ```
+
+**During Installation:**
+- All `.gpg` files automatically imported
+- No user interaction required
+- Import status logged
+- Installation continues even if some keys fail
+
+**After Installation:**
+- `full-update` and `purge-and-update` check for new keys
+- New keys automatically downloaded and imported from GitHub
+- Fingerprint comparison prevents duplicate imports
 
 **Example: Import from File**
 ```bash
