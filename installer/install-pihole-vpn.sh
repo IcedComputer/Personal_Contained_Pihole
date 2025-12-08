@@ -24,10 +24,12 @@
 # - UC-004: Professional communication
 #
 # Usage: sudo bash install-pihole-vpn.sh [OPTIONS]
-#        Options: --debug, --config=FILE
+#        Options: --debug, --config=FILE, --repair
 #
 
-set -euo pipefail
+# Note: Using 'set -eu' instead of 'set -euo pipefail' to allow interactive
+# prompts when script is piped from curl (one-line installation)
+set -eu
 
 # ============================================================================
 # GLOBAL VARIABLES
@@ -77,6 +79,8 @@ STATIC_IPV4=""
 GPG_KEY_COUNT=0
 REAL_USER=""             # Actual user (not root) who ran sudo
 ENABLE_MFA=""            # "yes" or "no" for 2FA setup
+REPAIR_MODE=false        # If true, skip completed steps
+STATE_FILE="/var/log/pihole-vpn-install.state"  # Track completed steps
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -114,6 +118,28 @@ debug_log() {
     if [[ "${DEBUG_MODE}" == true ]]; then
         echo -e "${COLOR_BLUE}[DEBUG]${COLOR_RESET} $1" | tee -a "${LOG_FILE}"
     fi
+}
+
+mark_step_complete() {
+    local step="$1"
+    echo "${step}" >> "${STATE_FILE}"
+    debug_log "Marked step complete: ${step}"
+}
+
+is_step_complete() {
+    local step="$1"
+    [[ -f "${STATE_FILE}" ]] && grep -q "^${step}$" "${STATE_FILE}" 2>/dev/null
+}
+
+skip_if_complete() {
+    local step="$1"
+    local description="$2"
+    
+    if [[ "${REPAIR_MODE}" == true ]] && is_step_complete "${step}"; then
+        log_info "Skipping ${description} (already completed)"
+        return 0  # Skip this step
+    fi
+    return 1  # Don't skip
 }
 
 show_header() {
@@ -158,6 +184,16 @@ show_summary_report() {
     if [[ ${#ERRORS[@]} -eq 0 ]] && [[ ${#WARNINGS[@]} -eq 0 ]]; then
         echo -e "${COLOR_GREEN}✓ Installation completed successfully with no issues!${COLOR_RESET}"
         echo ""
+    elif [[ ${#ERRORS[@]} -gt 0 ]]; then
+        echo -e "${COLOR_YELLOW}╔══════════════════════════════════════════════════════════════╗${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}║                   REPAIR MODE AVAILABLE                      ║${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}╚══════════════════════════════════════════════════════════════╝${COLOR_RESET}"
+        echo ""
+        echo -e "${COLOR_YELLOW}To resume/repair the installation, run:${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}  sudo bash install-pihole-vpn.sh --repair${COLOR_RESET}"
+        echo ""
+        echo "This will skip completed steps and retry failed ones."
+        echo ""
     fi
     
     echo "╔══════════════════════════════════════════════════════════════╗"
@@ -178,6 +214,12 @@ show_summary_report() {
     
     echo ""
     log_info "Full installation log: ${LOG_FILE}"
+    
+    if [[ ${#ERRORS[@]} -eq 0 ]]; then
+        log_info "Installation state file removed (successful completion)"
+    else
+        log_info "Installation state saved to: ${STATE_FILE}"
+    fi
 }
 
 # ============================================================================
@@ -656,9 +698,9 @@ install_pihole() {
     
     # Download and run installer
     if [[ "${PLATFORM}" == "rpi" ]] && [[ -f /etc/debian_version ]]; then
-        curl -sSL https://install.pi-hole.net | PIHOLE_SKIP_OS_CHECK=true bash | tee -a "${LOG_FILE}"
+        curl --tlsv1.3 -sSL https://install.pi-hole.net | PIHOLE_SKIP_OS_CHECK=true bash | tee -a "${LOG_FILE}"
     else
-        curl -sSL https://install.pi-hole.net | bash | tee -a "${LOG_FILE}"
+        curl --tlsv1.3 -sSL https://install.pi-hole.net | bash | tee -a "${LOG_FILE}"
     fi
     
     if [[ $? -eq 0 ]]; then
@@ -724,7 +766,7 @@ EOF
     
     # Generate dnsmasq Unbound configuration locally
     cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
-server=127.0.0.1#566
+server=127.0.0.1#5335
 edns-packet-max=1232
 EOF
     log_success "Generated dnsmasq Unbound configuration"
@@ -825,7 +867,7 @@ install_cloudflared() {
     # Add Cloudflare repository
     mkdir -p --mode=0755 /usr/share/keyrings
     
-    if curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; then
+    if curl --tlsv1.3 -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; then
         log_success "Added Cloudflare GPG key"
     else
         log_error "Failed to add Cloudflare GPG key"
@@ -981,6 +1023,11 @@ install_update_scripts() {
     else
         log_warning "Update script may have issues"
     fi
+}
+
+setup_github_authentication() {
+    # Function removed - repository is now public
+    :
 }
 
 setup_cron_jobs() {
@@ -1507,6 +1554,11 @@ parse_arguments() {
                 CONFIG_FILE="${1#*=}"
                 shift
                 ;;
+            --repair)
+                REPAIR_MODE=true
+                log_info "Repair mode enabled - will skip completed steps"
+                shift
+                ;;
             --help)
                 show_header
                 echo "Usage: sudo bash install-pihole-vpn.sh [OPTIONS]"
@@ -1514,6 +1566,7 @@ parse_arguments() {
                 echo "Options:"
                 echo "  --debug          Enable debug output"
                 echo "  --config=FILE    Use specified config file"
+                echo "  --repair         Resume/repair failed installation (skips completed steps)"
                 echo "  --help           Show this help message"
                 echo ""
                 echo "If no config file is specified, installer will run interactively."
@@ -1563,56 +1616,97 @@ main() {
     # Detect real user (before any user-specific operations)
     detect_real_user
     
-    # Installation steps
-    create_directories
-    system_update
-    install_dependencies
-    setup_unattended_upgrades
-    setup_fail2ban
+    # Installation steps with state tracking
+    if ! skip_if_complete "directories" "directory creation"; then
+        create_directories && mark_step_complete "directories"
+    fi
+    
+    if ! skip_if_complete "system_update" "system update"; then
+        system_update && mark_step_complete "system_update"
+    fi
+    
+    if ! skip_if_complete "dependencies" "dependency installation"; then
+        install_dependencies && mark_step_complete "dependencies"
+    fi
+    
+    if ! skip_if_complete "unattended_upgrades" "unattended upgrades"; then
+        setup_unattended_upgrades && mark_step_complete "unattended_upgrades"
+    fi
+    
+    if ! skip_if_complete "fail2ban" "Fail2Ban setup"; then
+        setup_fail2ban && mark_step_complete "fail2ban"
+    fi
     
     # SSH Hardening (before MFA so user can still login)
-    harden_ssh
+    if ! skip_if_complete "ssh_hardening" "SSH hardening"; then
+        harden_ssh && mark_step_complete "ssh_hardening"
+    fi
     
     # GPG Setup
-    generate_gpg_key
-    import_gpg_keys
+    if ! skip_if_complete "gpg_key" "GPG key generation"; then
+        generate_gpg_key && mark_step_complete "gpg_key"
+    fi
+    
+    if ! skip_if_complete "gpg_import" "GPG key import"; then
+        import_gpg_keys && mark_step_complete "gpg_import"
+    fi
     
     # Core installation
-    install_pihole
+    if ! skip_if_complete "pihole" "Pi-hole installation"; then
+        install_pihole && mark_step_complete "pihole"
+    fi
     
     # DNS Provider
-    case "${DNS_TYPE}" in
-        unbound)
-            install_unbound
-            ;;
-        cloudflared)
-            install_cloudflared
-            ;;
-        *)
-            log_error "Invalid DNS type: ${DNS_TYPE}"
-            exit 1
-            ;;
-    esac
+    if ! skip_if_complete "dns_provider" "DNS provider setup"; then
+        case "${DNS_TYPE}" in
+            unbound)
+                install_unbound && mark_step_complete "dns_provider"
+                ;;
+            cloudflared)
+                install_cloudflared && mark_step_complete "dns_provider"
+                ;;
+            *)
+                log_error "Invalid DNS type: ${DNS_TYPE}"
+                exit 1
+                ;;
+        esac
+    fi
     
     # Update scripts
-    install_update_scripts
-    setup_cron_jobs
+    if ! skip_if_complete "update_scripts" "update scripts installation"; then
+        install_update_scripts && mark_step_complete "update_scripts"
+    fi
+    
+    if ! skip_if_complete "cron_jobs" "cron job setup"; then
+        setup_cron_jobs && mark_step_complete "cron_jobs"
+    fi
     
     # VPN
-    install_wireguard
+    if ! skip_if_complete "wireguard" "WireGuard VPN"; then
+        install_wireguard && mark_step_complete "wireguard"
+    fi
     
     # Finalization
-    configure_server_dns
+    if ! skip_if_complete "dns_config" "server DNS configuration"; then
+        configure_server_dns && mark_step_complete "dns_config"
+    fi
     
     # MFA Setup (at the very end, requires user action)
-    setup_mfa
+    if ! skip_if_complete "mfa" "MFA setup"; then
+        setup_mfa && mark_step_complete "mfa"
+    fi
     
-    cleanup_installation
+    if ! skip_if_complete "cleanup" "cleanup"; then
+        cleanup_installation && mark_step_complete "cleanup"
+    fi
     
     # Summary
     log "========================================"
     log "Installation completed: $(date --iso-8601=seconds)"
     log "========================================"
+    
+    # Clean up state file on successful completion
+    rm -f "${STATE_FILE}"
     
     show_summary_report
     

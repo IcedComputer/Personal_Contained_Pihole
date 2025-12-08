@@ -67,6 +67,7 @@ sudo bash install-pihole-vpn.sh
 | Document | Description |
 |----------|-------------|
 | [INSTALL.md](docs/INSTALL.md) | Complete installation guide with all options |
+| [GITHUB_AUTH_SETUP.md](docs/GITHUB_AUTH_SETUP.md) | Private repository authentication setup |
 | [WIREGUARD-SECURITY.md](docs/WIREGUARD-SECURITY.md) | VPN security best practices and hardening |
 | [installer.conf.template](installer/installer.conf.template) | Configuration file reference |
 
@@ -91,6 +92,7 @@ Personal_Contained_Pihole/
 │   └── blocks/                      # Additional blocklists
 └── docs/
     ├── INSTALL.md                   # Installation guide
+    ├── GITHUB_AUTH_SETUP.md         # Authentication setup
     └── WIREGUARD-SECURITY.md        # VPN security guide
 ```
 

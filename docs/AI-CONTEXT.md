@@ -228,10 +228,12 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 - `cmd_refresh()` - Deploy all scripts to /scripts/Finished/
 
 **Script Management:**
-Downloads and deploys these 3 scripts:
+Downloads and deploys these 5 scripts:
 1. `refresh.sh` - Bootstrap updater
 2. `Research.sh` - Query research tool
-3. `wireguard-manager.sh` - VPN client manager
+3. `github_auth_helper.sh` - Authentication library
+4. `rotate-github-token.sh` - Token rotation utility
+5. `wireguard-manager.sh` - VPN client manager
 
 **Database Operations:**
 - Direct SQLite manipulation of `/etc/pihole/gravity.db`
@@ -319,17 +321,23 @@ install-pihole-vpn.sh (one-time)
 
 User runs: refresh.sh (as needed)
     ↓
+    Sources: github_auth_helper.sh
+    ↓
     Downloads: updates.sh
     ↓
     Instructs user: Run "updates.sh refresh"
 
 User runs: updates.sh refresh
     ↓
-    Downloads: All 3 scripts
+    Sources: github_auth_helper.sh
+    ↓
+    Downloads: All 5 scripts
     ↓
     Deploys: refresh.sh, Research.sh, wireguard-manager.sh
 
 User runs: updates.sh full-update
+    ↓
+    Sources: github_auth_helper.sh
     ↓
     Downloads: Lists, configs, scripts
     ↓
@@ -338,7 +346,23 @@ User runs: updates.sh full-update
     Updates: gravity.db
     ↓
     Restarts: pihole-FTL
+
+User runs: rotate-github-token.sh
+    ↓
+    Sources: github_auth_helper.sh (validates and tests token)
+    ↓
+    Updates: /scripts/Finished/CONFIG/github_token.conf
 ```
+
+### Source Chain
+
+**github_auth_helper.sh is sourced by:**
+- install-pihole-vpn.sh (line 948-954)
+- updates.sh (line 62-66)
+- refresh.sh (line 30-32)
+- rotate-github-token.sh (uses functions but doesn't source directly)
+
+**Critical: If github_auth_helper.sh changes signature, update all consumers**
 
 ---
 
@@ -348,12 +372,15 @@ User runs: updates.sh full-update
 
 1. **Pre-flight Checks**
    - Verify root privileges
+   - Source github_auth_helper.sh
    - Read configuration files (type.conf, test.conf, dns_type.conf)
    - Create temp directory
 
 2. **Script Downloads** (parallel when possible)
    - refresh.sh
    - Research.sh
+   - github_auth_helper.sh
+   - rotate-github-token.sh
    - wireguard-manager.sh
 
 3. **Configuration Downloads** (based on SERVER_TYPE)
@@ -672,6 +699,8 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
     ├── updates.sh                           (755, root:root)
     ├── refresh.sh                           (755, root:root)
     ├── Research.sh                          (755, root:root)
+    ├── github_auth_helper.sh                (755, root:root)
+    ├── rotate-github-token.sh               (755, root:root)
     ├── wireguard-manager.sh                 (755, root:root)
     ├── unbound_root_hints_update.sh         (755, root:root)
     ├── cloudflared                          (644, root:root)
@@ -1004,11 +1033,19 @@ grep "chmod.*github_token" scripts/*.sh
 ```bash
 # Check updates.sh downloads all required scripts
 grep -A10 "download_scripts()" scripts/updates.sh
-# Should include: refresh.sh, Research.sh, wireguard-manager.sh
+# Should include: refresh.sh, Research.sh, github_auth_helper.sh,
+#                 rotate-github-token.sh, wireguard-manager.sh
 
 # Check refresh.sh only downloads updates.sh
 grep -A10 "download()" scripts/refresh.sh
 # Should only show: updates.sh download
+```
+
+**5. Authentication Integration**
+```bash
+# Check all scripts source github_auth_helper.sh
+grep "source.*github_auth_helper" installer/*.sh scripts/*.sh
+# Should show: install-pihole-vpn.sh, updates.sh, refresh.sh
 ```
 
 ### Post-Installation Testing
@@ -1283,10 +1320,10 @@ token=$([ -f "$TOKEN_FILE" ] && cat "$TOKEN_FILE")
 **Principle:** Names should be self-documenting
 
 **Guidelines:**
-- Functions: Verb phrases (`download_file`, `validate_config`, `install_dependencies`)
-- Variables: Descriptive nouns (`CONFIG_FILE`, `REPO_BASE`, `SERVER_TYPE`)
+- Functions: Verb phrases (`download_file`, `validate_token`, `setup_github_authentication`)
+- Variables: Descriptive nouns (`TOKEN_FILE`, `REPO_BASE`, `SERVER_TYPE`)
 - Constants: SCREAMING_SNAKE_CASE (`readonly COLOR_GREEN`)
-- Files: Lowercase with hyphens (`wireguard-manager.sh`, `installer.conf.template`)
+- Files: Lowercase with hyphens (`github_auth_helper.sh`, `installer.conf.template`)
 
 **Avoid:**
 - Single-letter variables (except loop counters)
