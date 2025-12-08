@@ -402,8 +402,8 @@ prompt_configuration() {
         2) SERVER_TYPE="security" ;;
         3) SERVER_TYPE="basic" ;;
         *) 
-            log_error "Invalid choice"
-            exit 1
+            log_error "Invalid choice, defaulting to 'full'"
+            SERVER_TYPE="full"
             ;;
     esac
     log_success "Server type: ${SERVER_TYPE}"
@@ -419,8 +419,8 @@ prompt_configuration() {
         1) DNS_TYPE="unbound" ;;
         2) DNS_TYPE="cloudflared" ;;
         *) 
-            log_error "Invalid choice"
-            exit 1
+            log_error "Invalid choice, defaulting to 'unbound'"
+            DNS_TYPE="unbound"
             ;;
     esac
     log_success "DNS provider: ${DNS_TYPE}"
@@ -432,8 +432,8 @@ prompt_configuration() {
         y|yes|"") INSTALL_VPN="yes" ;;
         n|no) INSTALL_VPN="no" ;;
         *)
-            log_error "Invalid choice"
-            exit 1
+            log_error "Invalid choice, defaulting to 'yes'"
+            INSTALL_VPN="yes"
             ;;
     esac
     log_success "VPN installation: ${INSTALL_VPN}"
@@ -1240,6 +1240,44 @@ EOF
     # Configure firewall for WireGuard
     configure_wireguard_firewall
     
+    # Configure dnsmasq for WireGuard VPN network
+    log_info "Configuring DNS for VPN clients..."
+    cat > /etc/dnsmasq.d/02-pihole-wireguard.conf <<EOF
+# WireGuard VPN DNS Configuration
+# Created: $(date --iso-8601=seconds)
+# Allows VPN clients to use Pi-hole for DNS filtering
+
+# Listen on WireGuard interface for DNS queries from VPN clients
+interface=wg0
+
+# Do not bind to WireGuard interface for DHCP (VPN uses static IPs)
+no-dhcp-interface=wg0
+
+# Host file for VPN client hostname resolution
+addn-hosts=${WIREGUARD_DIR}/hosts
+EOF
+    chmod 644 /etc/dnsmasq.d/02-pihole-wireguard.conf
+    log_success "DNS configuration created for VPN clients"
+    
+    # Create initial hosts file for WireGuard clients
+    log_info "Creating WireGuard hosts file..."
+    cat > "${WIREGUARD_DIR}/hosts" <<EOF
+# WireGuard VPN Client Hostnames
+# Created: $(date --iso-8601=seconds)
+# This file is automatically updated by wireguard-manager.sh
+# Format: <IP> <hostname>
+
+# Server
+${WIREGUARD_SERVER_IP} wg-server
+EOF
+    chmod 644 "${WIREGUARD_DIR}/hosts"
+    log_success "WireGuard hosts file created"
+    
+    # Restart DNS services to apply dnsmasq config
+    log_info "Restarting DNS services..."
+    systemctl restart pihole-FTL 2>/dev/null || service pihole-FTL restart
+    log_success "DNS services restarted"
+    
     # Create client management helper script
     install_wireguard_helpers
     
@@ -1743,26 +1781,38 @@ main() {
     echo "║                   NEXT STEPS                                 ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "1. Update SSH configuration:"
-    echo "   Edit /etc/ssh/sshd_config and add your username to AllowUsers"
-    echo ""
     
-    if [[ "${INSTALL_VPN}" == "yes" ]]; then
-        echo "2. Create WireGuard VPN clients:"
-        echo "   Run: sudo bash ${PATH_FINISHED}/wireguard-manager.sh"
-        echo ""
-    fi
+    local step=1
     
-    echo "3. Access Pi-hole admin interface:"
-    echo "   http://${STATIC_IPV4}/admin"
-    echo ""
-    echo "4. Set Pi-hole admin password:"
+    echo "${step}. Set Pi-hole admin password:"
     echo "   sudo pihole -a -p"
     echo ""
-    echo "5. Review installation log:"
+    ((step++))
+    
+    if [[ "${INSTALL_VPN}" == "yes" ]]; then
+        echo "${step}. Create WireGuard VPN clients:"
+        echo "   Run: sudo bash ${PATH_FINISHED}/wireguard-manager.sh"
+        echo ""
+        ((step++))
+    fi
+    
+    echo "${step}. Access Pi-hole admin interface:"
+    echo "   http://${STATIC_IPV4}/admin"
+    echo ""
+    ((step++))
+    
+    echo "${step}. Review installation log:"
     echo "   ${LOG_FILE}"
     echo ""
-    echo "6. Reboot server to apply all changes:"
+    ((step++))
+    
+    echo "${step}. IMPORTANT - Test SSH access before closing this session:"
+    echo "   SSH is configured for user: ${REAL_USER}"
+    echo "   Open a NEW terminal and test SSH login before closing this session!"
+    echo ""
+    ((step++))
+    
+    echo "${step}. Reboot server to apply all changes:"
     echo "   sudo reboot"
     echo ""
 }

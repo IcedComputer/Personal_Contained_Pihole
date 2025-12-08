@@ -42,6 +42,17 @@ chmod +x install-pihole-vpn.sh
 sudo bash install-pihole-vpn.sh
 ```
 
+### Repair/Resume Failed Installation
+
+If installation fails or is interrupted, resume from where it stopped:
+
+```bash
+# Resume installation, skipping completed steps
+sudo bash install-pihole-vpn.sh --repair
+```
+
+The installer tracks completed steps in `/var/log/pihole-vpn-install.state` and only re-runs failed or incomplete steps.
+
 ### Unattended Installation
 
 ```bash
@@ -67,8 +78,8 @@ sudo bash install-pihole-vpn.sh
 | Document | Description |
 |----------|-------------|
 | [INSTALL.md](docs/INSTALL.md) | Complete installation guide with all options |
-| [GITHUB_AUTH_SETUP.md](docs/GITHUB_AUTH_SETUP.md) | Private repository authentication setup |
 | [WIREGUARD-SECURITY.md](docs/WIREGUARD-SECURITY.md) | VPN security best practices and hardening |
+| [AI-CONTEXT.md](docs/AI-CONTEXT.md) | Technical reference for AI assistants |
 | [installer.conf.template](installer/installer.conf.template) | Configuration file reference |
 
 ---
@@ -239,13 +250,20 @@ sudo bash /scripts/Finished/wireguard-manager.sh
 - ✅ List all clients with status
 - ✅ Remove clients
 - ✅ Show client configurations
+- ✅ Display QR codes for mobile setup
+- ✅ Revoke client access
 - ✅ Display connection statistics
+- ✅ Restart WireGuard service
+- ✅ Backup all configurations
+- ✅ Show file locations (NEW)
 
 ### VPN Network
 
 - **Server IP:** 10.7.0.1/24
 - **Client Range:** 10.7.0.2 - 10.7.0.254
 - **DNS:** Pi-hole (automatic for VPN clients)
+- **Hostname Resolution:** VPN clients can ping each other by hostname
+- **Hosts File:** `/etc/wireguard/hosts` (auto-managed)
 - **Port:** 51820 UDP (configurable)
 
 ---
@@ -358,8 +376,8 @@ sudo apt-get remove --purge pihole-FTL cloudflared unbound wireguard fail2ban
 ### Documentation
 
 - Full installation guide: [docs/INSTALL.md](docs/INSTALL.md)
-- Authentication setup: [docs/GITHUB_AUTH_SETUP.md](docs/GITHUB_AUTH_SETUP.md)
-- VPN security: [docs/WIREGUARD-SECURITY.md](docs/WIREGUARD-SECURITY.md)
+- VPN security guide: [docs/WIREGUARD-SECURITY.md](docs/WIREGUARD-SECURITY.md)
+- Technical reference: [docs/AI-CONTEXT.md](docs/AI-CONTEXT.md)
 
 ### Community Resources
 
@@ -385,17 +403,19 @@ This project consolidates and enhances multiple Pi-hole deployment tools into a 
 
 - ✅ Repository consolidation (Personal-Pi-Hole-configs + Azure-Pihole-VPN-setup)
 - ✅ Comprehensive installer with interactive and unattended modes
-- ✅ GitHub private repository authentication support
+- ✅ Repair mode for resuming failed installations (--repair flag)
+- ✅ Automatic configuration file generation for update scripts
 - ✅ Streamlined update process (refresh.sh → updates.sh → all scripts)
 - ✅ Progressive Fail2Ban (25min → 7day → permanent)
 - ✅ Enhanced documentation with step-by-step guides
 - ✅ Config template with detailed examples
-- ✅ Token rotation tool for secure credential management
-- ✅ WireGuard VPN management with interactive CLI
+- ✅ WireGuard VPN with hostname resolution (addn-hosts)
+- ✅ VPN client manager with 10 menu options including file locations
 - ✅ Three installation profiles (full, security, basic)
 - ✅ Two DNS providers (Unbound, Cloudflared)
 - ✅ Security hardening (SSH, MFA, unattended-upgrades)
 - ✅ Automated maintenance with randomized cron schedules
+- ✅ TLS 1.3 enforcement for all downloads
 
 ---
 

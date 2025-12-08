@@ -169,35 +169,40 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 - `setup_github_authentication()` - Optional token configuration
 
 **Installation Flow:**
-1. Parse arguments (`--debug`, `--config=FILE`)
+1. Parse arguments (`--debug`, `--config=FILE`, `--repair`)
 2. Check root privileges
 3. Detect platform and network
 4. Load config or prompt interactively
 5. Confirm settings with user
 6. Create directory structure
-7. System update and dependencies
-8. Security setup (unattended-upgrades, Fail2Ban, SSH)
-9. GPG key generation and import
-10. Pi-hole installation
-11. DNS provider (Unbound or Cloudflared)
-12. Update scripts installation
-13. GitHub authentication (optional)
+7. Generate configuration files (type.conf, dns_type.conf, test.conf, ver.conf)
+8. System update and dependencies
+9. Security setup (unattended-upgrades, Fail2Ban, SSH)
+10. GPG key generation and import
+11. Pi-hole installation
+12. DNS provider (Unbound or Cloudflared)
+13. Update scripts installation
 14. Cron job configuration
-15. WireGuard VPN (optional)
+15. WireGuard VPN (optional) with dnsmasq addn-hosts configuration
 16. MFA configuration (optional)
 17. Final status summary
+
+**Repair Mode:**
+- Flag: `--repair`
+- State file: `/var/log/pihole-vpn-install.state`
+- Tracks completed steps, skips them on re-run
+- Useful for interrupted or failed installations
 
 **Critical Paths:**
 ```
 /scripts/
   ├── temp/                    # Temporary downloads
   └── Finished/                # Deployed scripts
-      ├── CONFIG/              # Configuration files (700 permissions)
-
-      │   ├── type.conf                  (server type)
-      │   ├── test.conf                  (test system flag)
-      │   ├── dns_type.conf              (unbound/cloudflared)
-      │   └── ver.conf                   (Pi-hole version)
+      ├── CONFIG/              # Configuration files (755 permissions)
+      │   ├── type.conf                  (server type: "full"/"security"/"basic")
+      │   ├── test.conf                  (test mode: "no"/"yes" - literal strings)
+      │   ├── dns_type.conf              ("cloudflared"/"unbound" - literal strings)
+      │   └── ver.conf                   (Pi-hole version: "6")
       └── *.sh                 # All management scripts (755)
 ```
 
@@ -228,12 +233,10 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 - `cmd_refresh()` - Deploy all scripts to /scripts/Finished/
 
 **Script Management:**
-Downloads and deploys these 5 scripts:
+Downloads and deploys these 3 scripts:
 1. `refresh.sh` - Bootstrap updater
 2. `Research.sh` - Query research tool
-3. `github_auth_helper.sh` - Authentication library
-4. `rotate-github-token.sh` - Token rotation utility
-5. `wireguard-manager.sh` - VPN client manager
+3. `wireguard-manager.sh` - VPN client manager
 
 **Database Operations:**
 - Direct SQLite manipulation of `/etc/pihole/gravity.db`
@@ -242,10 +245,16 @@ Downloads and deploys these 5 scripts:
 - Preserves Pi-hole's internal structure
 
 **Configuration Files Read:**
-- `/scripts/Finished/CONFIG/type.conf` - Server type (full/security/basic)
-- `/scripts/Finished/CONFIG/test.conf` - Test system flag
-- `/scripts/Finished/CONFIG/dns_type.conf` - DNS provider
-- `/scripts/Finished/CONFIG/ver.conf` - Pi-hole version
+- `/scripts/Finished/CONFIG/type.conf` - Server type ("full"/"security"/"basic")
+- `/scripts/Finished/CONFIG/test.conf` - Test mode ("no" or "yes" - literal strings)
+- `/scripts/Finished/CONFIG/dns_type.conf` - DNS provider ("cloudflared" or "unbound" - literal strings)
+- `/scripts/Finished/CONFIG/ver.conf` - Pi-hole version ("6")
+
+**CRITICAL:** Config files contain literal strings, NOT numeric values:
+- dns_type.conf: "cloudflared" or "unbound" (NOT 0/1)
+- test.conf: "no" or "yes" (NOT 0/1)
+- Installer creates these files automatically with correct format
+- Directory permissions: 755 (CONFIG dir), 644 (config files)
 
 ### 3. refresh.sh (111 lines)
 
@@ -266,28 +275,42 @@ Downloads and deploys these 5 scripts:
 - Now downloads only updates.sh
 - Updates.sh handles all other script downloads
 
-### 4. wireguard-manager.sh (625 lines)
+### 4. wireguard-manager.sh (870+ lines)
 
-**Purpose:** Interactive VPN client management
+**Purpose:** Interactive VPN client management with hostname resolution
 
 **Features:**
-- Add clients (generates config + QR code)
-- List clients with connection status
-- Remove clients
-- Show client configurations
-- Connection statistics
+1. Add clients (generates config + QR code)
+2. List clients with connection status
+3. Remove clients
+4. Show client configurations
+5. Display QR codes for mobile setup
+6. Revoke client access
+7. Show VPN statistics
+8. Restart WireGuard service
+9. Backup configurations
+10. Show file locations (NEW)
 
 **Key Functions:**
-- `add_client()` - Generate keys, create config, add to server
-- `list_clients()` - Show all clients with status (connected/configured)
-- `remove_client()` - Remove from server config and cleanup
+- `add_client()` - Generate keys, create config, add to server, update hosts file
+- `list_clients()` - Show all clients with status (connected/not in config)
+- `remove_client()` - Remove from server config, hosts file, and cleanup
 - `show_client_config()` - Display config for reimport
-- `show_menu()` - Interactive TUI menu
+- `show_file_locations()` - Display all config file paths and status (NEW)
+- `show_menu()` - Interactive TUI menu (10 options)
 
 **VPN Network:**
-- Server: 10.7.0.1/24
+- Server: 10.7.0.1/24 (hostname: wg-server)
 - Clients: 10.7.0.2 - 10.7.0.254
 - DNS: 10.7.0.1 (Pi-hole)
+- Hostname Resolution: `/etc/wireguard/hosts` with dnsmasq addn-hosts
+
+**Hostname Resolution:**
+- Each client gets entry in `/etc/wireguard/hosts`
+- Format: `10.7.0.X clientname`
+- Dnsmasq config: `/etc/dnsmasq.d/02-pihole-wireguard.conf`
+- Automatic updates when clients added/removed
+- DNS service restarted after hosts file changes
 - Port: Configurable (default 51820)
 
 **Security:**
@@ -716,6 +739,7 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 
 /etc/wireguard/                              (700, root:root) ← CRITICAL
 ├── wg0.conf                                 (600, root:root) ← SENSITIVE
+├── hosts                                    (644, root:root) ← VPN hostname mappings
 ├── clients/                                 (700, root:root)
 │   └── *.conf                               (600, root:root) ← SENSITIVE
 ├── server-private.key                       (600, root:root) ← SENSITIVE
@@ -723,7 +747,9 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 
 /etc/dnsmasq.d/                              (755, root:root)
 ├── 01-pihole.conf                           (644, root:root)
+├── 02-pihole-wireguard.conf                 (644, root:root) ← VPN DNS config
 ├── 50-cloudflared.conf                      (644, root:root)
+├── 51-unbound.conf                          (644, root:root)
 └── 99-edns.conf                             (644, root:root)
 
 /var/log/                                    (755, root:root)
@@ -757,10 +783,18 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 ### Permission Changes Made (2025-12-07)
 
 **Fixed: CONFIG Directory**
-- **Was:** 755 (world-readable)
-- **Now:** 700 (root-only)
-- **Location:** install-pihole-vpn.sh line 486
-- **Reason:** Contains github_token.conf (600), directory shouldn't be listable
+- **Was:** 700 (root-only, blocked update scripts)
+- **Now:** 755 (readable by scripts)
+- **Location:** install-pihole-vpn.sh line 530
+- **Reason:** Update scripts need to read type.conf, dns_type.conf, test.conf, ver.conf
+- **Security:** Config files still 644, directory traversable for script access
+
+**Added: WireGuard Hosts File**
+- **File:** `/etc/wireguard/hosts` (644, root:root)
+- **Purpose:** VPN client hostname-to-IP mappings
+- **Format:** `10.7.0.X clientname` (one per line)
+- **Integration:** Dnsmasq `addn-hosts=/etc/wireguard/hosts`
+- **Maintenance:** Auto-updated by wireguard-manager.sh when adding/removing clients
 
 ### Permission Validation Commands
 

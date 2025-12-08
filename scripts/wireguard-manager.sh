@@ -91,9 +91,10 @@ show_menu() {
     echo "  7) Show VPN statistics"
     echo "  8) Restart WireGuard"
     echo "  9) Backup configurations"
+    echo " 10) Show file locations"
     echo "  0) Exit"
     echo ""
-    read -p "Enter choice [0-9]: " choice
+    read -p "Enter choice [0-10]: " choice
     
     case $choice in
         1) add_client ;;
@@ -105,6 +106,7 @@ show_menu() {
         7) show_statistics ;;
         8) restart_wireguard ;;
         9) backup_configs ;;
+        10) show_file_locations ;;
         0) exit 0 ;;
         *) 
             log_error "Invalid choice"
@@ -254,6 +256,25 @@ EOF
         log_success "Client successfully added to WireGuard"
     else
         log_warning "Client may not have been added correctly, check configuration"
+    fi
+    
+    # Add hostname to hosts file for DNS resolution
+    log_info "Adding hostname to DNS..."
+    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
+        # Remove any existing entry for this client (in case of re-add)
+        sed -i "/[[:space:]]${client_name}$/d" "${WIREGUARD_DIR}/hosts"
+        # Add new entry
+        echo "${client_ip} ${client_name}" >> "${WIREGUARD_DIR}/hosts"
+        log_success "Hostname '${client_name}' added to DNS"
+        
+        # Restart dnsmasq to reload hosts file
+        if systemctl restart pihole-FTL 2>/dev/null || service pihole-FTL restart 2>/dev/null; then
+            log_success "DNS service restarted"
+        else
+            log_warning "Failed to restart DNS service, hostname may not resolve immediately"
+        fi
+    else
+        log_warning "Hosts file not found at ${WIREGUARD_DIR}/hosts"
     fi
     
     # Ask to show QR code
@@ -415,6 +436,22 @@ manual_remove_client() {
         log_success "Client '${client_name}' removed successfully"
     else
         log_warning "Client may still be active, manual verification needed"
+    fi
+    
+    # Remove hostname from hosts file
+    log_info "Removing hostname from DNS..."
+    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
+        sed -i "/[[:space:]]${client_name}$/d" "${WIREGUARD_DIR}/hosts"
+        log_success "Hostname '${client_name}' removed from DNS"
+        
+        # Restart dnsmasq to reload hosts file
+        if systemctl restart pihole-FTL 2>/dev/null || service pihole-FTL restart 2>/dev/null; then
+            log_success "DNS service restarted"
+        else
+            log_warning "Failed to restart DNS service"
+        fi
+    else
+        log_warning "Hosts file not found at ${WIREGUARD_DIR}/hosts"
     fi
     
     echo ""
@@ -744,6 +781,12 @@ backup_configs() {
         log_success "Backed up client configurations"
     fi
     
+    # Backup hosts file
+    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
+        cp "${WIREGUARD_DIR}/hosts" "${backup_dir}/"
+        log_success "Backed up hosts file"
+    fi
+    
     # Create archive
     tar -czf "${backup_dir}.tar.gz" -C "$(dirname ${backup_dir})" "$(basename ${backup_dir})"
     rm -rf "${backup_dir}"
@@ -751,6 +794,78 @@ backup_configs() {
     log_success "Backup created: ${backup_dir}.tar.gz"
     
     echo ""
+    read -p "Press Enter to return to menu..."
+    show_menu
+}
+
+show_file_locations() {
+    show_header
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                    FILE LOCATIONS                            ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    echo -e "${COLOR_BLUE}Server Configuration:${COLOR_RESET}"
+    echo "  Server Config:     ${CONFIG_FILE}"
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        echo -e "                     ${COLOR_GREEN}✓ EXISTS${COLOR_RESET}"
+    else
+        echo -e "                     ${COLOR_RED}✗ MISSING${COLOR_RESET}"
+    fi
+    echo ""
+    
+    echo -e "${COLOR_BLUE}Client Configurations:${COLOR_RESET}"
+    echo "  Client Directory:  ${CLIENTS_DIR}"
+    if [[ -d "${CLIENTS_DIR}" ]]; then
+        local client_count=$(ls -1 "${CLIENTS_DIR}"/*.conf 2>/dev/null | wc -l)
+        echo -e "                     ${COLOR_GREEN}✓ EXISTS (${client_count} clients)${COLOR_RESET}"
+    else
+        echo -e "                     ${COLOR_RED}✗ MISSING${COLOR_RESET}"
+    fi
+    echo ""
+    
+    echo -e "${COLOR_BLUE}DNS/Hostname Resolution:${COLOR_RESET}"
+    echo "  Hosts File:        ${WIREGUARD_DIR}/hosts"
+    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
+        local host_count=$(grep -c "^[^#]" "${WIREGUARD_DIR}/hosts" 2>/dev/null || echo "0")
+        echo -e "                     ${COLOR_GREEN}✓ EXISTS (${host_count} entries)${COLOR_RESET}"
+    else
+        echo -e "                     ${COLOR_RED}✗ MISSING${COLOR_RESET}"
+    fi
+    echo "  Dnsmasq Config:    /etc/dnsmasq.d/02-pihole-wireguard.conf"
+    if [[ -f "/etc/dnsmasq.d/02-pihole-wireguard.conf" ]]; then
+        echo -e "                     ${COLOR_GREEN}✓ EXISTS${COLOR_RESET}"
+    else
+        echo -e "                     ${COLOR_RED}✗ MISSING${COLOR_RESET}"
+    fi
+    echo ""
+    
+    echo -e "${COLOR_BLUE}Keys:${COLOR_RESET}"
+    echo "  Server Public Key: ${WIREGUARD_DIR}/server-public.key"
+    if [[ -f "${WIREGUARD_DIR}/server-public.key" ]]; then
+        echo -e "                     ${COLOR_GREEN}✓ EXISTS${COLOR_RESET}"
+    else
+        echo -e "                     ${COLOR_YELLOW}⚠ MISSING (extracted from config)${COLOR_RESET}"
+    fi
+    echo ""
+    
+    echo -e "${COLOR_BLUE}Backups:${COLOR_RESET}"
+    echo "  Removed Clients:   ${CLIENTS_DIR}/.removed"
+    if [[ -d "${CLIENTS_DIR}/.removed" ]]; then
+        local removed_count=$(ls -1 "${CLIENTS_DIR}/.removed" 2>/dev/null | wc -l)
+        echo -e "                     ${COLOR_GREEN}✓ EXISTS (${removed_count} backups)${COLOR_RESET}"
+    else
+        echo -e "                     ${COLOR_YELLOW}⚠ NO BACKUPS${COLOR_RESET}"
+    fi
+    echo ""
+    
+    echo -e "${COLOR_BLUE}Quick Access Commands:${COLOR_RESET}"
+    echo "  View server config:   cat ${CONFIG_FILE}"
+    echo "  List client files:    ls -lh ${CLIENTS_DIR}"
+    echo "  View hosts file:      cat ${WIREGUARD_DIR}/hosts"
+    echo "  View dnsmasq config:  cat /etc/dnsmasq.d/02-pihole-wireguard.conf"
+    echo ""
+    
     read -p "Press Enter to return to menu..."
     show_menu
 }

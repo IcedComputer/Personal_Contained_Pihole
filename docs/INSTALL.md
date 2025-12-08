@@ -39,6 +39,27 @@ chmod +x install-pihole-vpn.sh
 sudo bash install-pihole-vpn.sh
 ```
 
+### Repair Mode (Resume Failed Installation)
+
+If installation fails or is interrupted, you can resume from where it stopped:
+
+```bash
+# Resume installation, skipping already completed steps
+sudo bash install-pihole-vpn.sh --repair
+```
+
+**How Repair Mode Works:**
+- Tracks completed installation steps in `/var/log/pihole-vpn-install.state`
+- Automatically skips steps that completed successfully
+- Re-runs only failed or incomplete steps
+- Useful for network interruptions, package failures, or manual cancellations
+- State file is automatically deleted on successful completion
+
+**Example Repair Scenarios:**
+- Pi-hole installation failed → Repair mode skips system updates and retries Pi-hole
+- Network timeout during script download → Repair mode skips completed installs
+- Manual cancellation during VPN setup → Repair mode resumes from VPN step
+
 ### Unattended Installation
 
 ```bash
@@ -420,6 +441,7 @@ sudo bash /scripts/Finished/wireguard-manager.sh
 7. Show VPN statistics
 8. Restart WireGuard
 9. Backup configurations
+10. Show file locations (server config, client directory, hosts file, dnsmasq config, keys, backups)
 
 **Note:** This installer uses a modern, secure WireGuard implementation built from scratch, not relying on the unmaintained PiVPN project. All security features are implemented with current best practices.
 
@@ -465,6 +487,34 @@ sudo wg-quick up wg0
    ```
 3. Import configuration into WireGuard application
 4. Activate tunnel
+
+### VPN Client Hostname Resolution
+
+VPN clients can ping each other by hostname thanks to automatic DNS configuration:
+
+**How It Works:**
+- Each VPN client gets an entry in `/etc/wireguard/hosts`
+- Format: `10.7.0.X clientname`
+- Pi-hole uses dnsmasq `addn-hosts` directive to load this file
+- Hostnames automatically added/removed when clients are created/deleted
+
+**Example:**
+```bash
+# On VPN server or any connected client
+ping laptop        # Resolves to 10.7.0.2
+ping phone         # Resolves to 10.7.0.3
+ping wg-server     # Resolves to 10.7.0.1
+```
+
+**View Current Hostnames:**
+```bash
+cat /etc/wireguard/hosts
+```
+
+**Dnsmasq Configuration:**
+```bash
+cat /etc/dnsmasq.d/02-pihole-wireguard.conf
+```
 
 ### Firewall Configuration
 
@@ -616,6 +666,68 @@ sudo journalctl -xe
 # Follow logs
 sudo journalctl -f
 ```
+
+---
+
+## Configuration Files
+
+### Automatically Generated Files
+
+The installer creates configuration files in `/scripts/Finished/CONFIG/` that are used by update scripts:
+
+**type.conf** - Installation profile
+```bash
+# Contents: "full", "security", or "basic"
+cat /scripts/Finished/CONFIG/type.conf
+```
+
+**dns_type.conf** - DNS provider
+```bash
+# Contents: "cloudflared" or "unbound" (literal strings, not numeric)
+cat /scripts/Finished/CONFIG/dns_type.conf
+```
+
+**test.conf** - Test mode flag
+```bash
+# Contents: "no" for production, "yes" for test mode (literal strings)
+cat /scripts/Finished/CONFIG/test.conf
+```
+
+**ver.conf** - Pi-hole version
+```bash
+# Contents: "6" (Pi-hole major version)
+cat /scripts/Finished/CONFIG/ver.conf
+```
+
+### DNS Configuration Files
+
+**Unbound Configuration:**
+```bash
+/etc/unbound/unbound.conf.d/pi-hole.conf    # Unbound Pi-hole config
+/etc/dnsmasq.d/51-unbound.conf              # Dnsmasq upstream config
+/var/lib/unbound/root.hints                 # DNS root servers
+```
+
+**Cloudflared Configuration:**
+```bash
+/scripts/Finished/cloudflared               # Cloudflared settings
+/lib/systemd/system/cloudflared.service     # Systemd service
+/etc/dnsmasq.d/50-cloudflared.conf          # Dnsmasq upstream config
+```
+
+**WireGuard DNS Configuration:**
+```bash
+/etc/dnsmasq.d/02-pihole-wireguard.conf     # VPN interface config
+/etc/wireguard/hosts                        # VPN hostname mappings
+```
+
+### File Permissions
+
+The installer automatically sets correct permissions:
+- `/scripts/Finished/CONFIG/` - 755 (readable by update scripts)
+- Configuration files - 644 (readable by all scripts)
+- WireGuard configs - 600 (root only)
+- Client directory - 700 (root only)
 
 ---
 
