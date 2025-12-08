@@ -659,11 +659,11 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 - WireGuard keys: Pre-shared keys for all clients
 
 **Layer 6a: GPG Key Auto-Management**
-- Public keys stored in: `installer/public-gpg-keys/*.gpg`
+- Public keys stored in GitHub repository: `installer/public-gpg-keys/*.gpg`
+- Downloaded during installation to: `/scripts/Finished/CONFIG/public-gpg-keys/`
 - Auto-imported during installation (no user prompts)
 - Auto-checked and updated during `full-update` and `purge-and-update`
 - Fingerprint-based comparison prevents duplicate imports
-- Cached in: `/scripts/Finished/CONFIG/public-gpg-keys/`
 - Updates script checks GitHub for new keys automatically
 
 **Layer 7: System Updates**

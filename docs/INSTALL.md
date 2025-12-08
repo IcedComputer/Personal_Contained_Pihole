@@ -236,11 +236,17 @@ Use this IP as static? [Y/n] or enter different IP:
 - Public key exported to `/scripts/Finished/server-public-key.gpg`
 
 #### Automatic Public Key Import
-Public keys are automatically imported from `installer/public-gpg-keys/`:
+Public keys are automatically downloaded and imported during installation:
 
-**Before Installation:**
+**Setup Process:**
+1. Installer downloads public keys from GitHub repository (`installer/public-gpg-keys/`)
+2. Keys are cached to `/scripts/Finished/CONFIG/public-gpg-keys/`
+3. All `.gpg` files automatically imported to GPG keyring
+4. Updates script checks for new keys during `full-update` and `purge-and-update`
+
+**Adding Keys to Repository:**
 ```bash
-# Add your public keys to the repository
+# Add your public keys to the repository before pushing
 cd pihole-installer/installer/public-gpg-keys/
 # Copy your .gpg public key files here
 ls -la
@@ -248,8 +254,8 @@ ls -la
 ```
 
 **During Installation:**
-- All `.gpg` files automatically imported
-- No user interaction required
+- Keys downloaded from GitHub automatically
+- All `.gpg` files imported without user interaction
 - Import status logged
 - Installation continues even if some keys fail
 

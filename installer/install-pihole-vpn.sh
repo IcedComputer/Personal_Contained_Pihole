@@ -642,10 +642,62 @@ EOF
     rm -f "${PATH_TEMP}/gpg-gen-key.conf"
 }
 
+download_public_gpg_keys() {
+    log_info "Downloading public GPG keys from repository..."
+    
+    local github_key_dir="${GITHUB_REPO}/raw/refs/heads/main/installer/public-gpg-keys"
+    local dest_dir="${PATH_FINISHED}/public-gpg-keys"
+    
+    # Create destination directory
+    mkdir -p "${dest_dir}"
+    
+    # Try to get list of key files from GitHub
+    log_info "Fetching key list from repository..."
+    
+    # Download using the GitHub API to list files
+    local api_url="https://api.github.com/repos/${GITHUB_REPO#https://github.com/}/contents/installer/public-gpg-keys"
+    
+    local key_files=$(curl -s "${api_url}" | grep -oP '"name":\s*"\K[^"]+\.(?:gpg|asc|key)' || true)
+    
+    if [[ -z "${key_files}" ]]; then
+        log_info "No GPG keys found in repository, skipping download"
+        return 0
+    fi
+    
+    # Download each key file
+    local downloaded=0
+    local failed=0
+    
+    while IFS= read -r key_file; do
+        if [[ -n "${key_file}" ]]; then
+            local download_url="${github_key_dir}/${key_file}"
+            local dest_path="${dest_dir}/${key_file}"
+            
+            log_info "Downloading: ${key_file}"
+            
+            if curl -sSL -o "${dest_path}" "${download_url}"; then
+                ((downloaded++))
+                log_success "Downloaded: ${key_file}"
+            else
+                ((failed++))
+                log_warning "Failed to download: ${key_file}"
+            fi
+        fi
+    done <<< "${key_files}"
+    
+    log_info "Downloaded ${downloaded} GPG key(s) to ${dest_dir}"
+    
+    if [[ ${failed} -gt 0 ]]; then
+        log_warning "${failed} key download(s) failed"
+    fi
+    
+    return 0
+}
+
 import_gpg_keys() {
     log_info "Auto-importing GPG public keys..."
     
-    local keys_dir="${SCRIPT_DIR}/public-gpg-keys"
+    local keys_dir="${PATH_FINISHED}/public-gpg-keys"
     local imported_count=0
     local failed_count=0
     
@@ -760,13 +812,19 @@ install_unbound() {
     cat > /etc/unbound/unbound.conf.d/pi-hole.conf << 'EOF'
 server:
     # Network settings
-    interface: 127.0.0.1
+    interface: 0.0.0.0
     port: 5335
     do-ip4: yes
     do-udp: yes
     do-tcp: yes
     do-ip6: no
     prefer-ip6: no
+    
+    # Access control - allow localhost and private networks (including VPN)
+    access-control: 127.0.0.0/8 allow
+    access-control: 10.0.0.0/8 allow
+    access-control: 172.16.0.0/12 allow
+    access-control: 192.168.0.0/16 allow
 
     # Root hints for recursive resolution
     root-hints: "/var/lib/unbound/root.hints"
@@ -1744,6 +1802,10 @@ main() {
     fi
     
     # GPG Setup
+    if ! skip_if_complete "gpg_download" "GPG public key download"; then
+        download_public_gpg_keys && mark_step_complete "gpg_download"
+    fi
+    
     if ! skip_if_complete "gpg_key" "GPG key generation"; then
         generate_gpg_key && mark_step_complete "gpg_key"
     fi
