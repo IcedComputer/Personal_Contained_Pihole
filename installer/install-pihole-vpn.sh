@@ -525,9 +525,35 @@ create_directories() {
     chmod 755 "${PATH_SCRIPTS}"
     chmod 755 "${PATH_TEMP}"
     chmod 755 "${PATH_FINISHED}"
-    chmod 700 "${PATH_CONFIG}"  # Restricted - contains sensitive files (tokens, keys)
+    chmod 755 "${PATH_CONFIG}"  # Changed to 755 so updates.sh can read config files
     
     log_success "Directories created"
+}
+
+create_config_files() {
+    log_info "Creating configuration files for update scripts..."
+    
+    # Create type.conf (server type: full, security, basic)
+    echo "${SERVER_TYPE}" > "${PATH_CONFIG}/type.conf"
+    chmod 644 "${PATH_CONFIG}/type.conf"
+    
+    # Create dns_type.conf (dns provider: literal string 'cloudflared' or 'unbound')
+    echo "${DNS_TYPE}" > "${PATH_CONFIG}/dns_type.conf"
+    chmod 644 "${PATH_CONFIG}/dns_type.conf"
+    
+    # Create test.conf (test mode: 'no' = production, 'yes' = test)
+    echo "no" > "${PATH_CONFIG}/test.conf"
+    chmod 644 "${PATH_CONFIG}/test.conf"
+    
+    # Create ver.conf (Pi-hole version: 5 or 6)
+    echo "${PIHOLE_VERSION}" > "${PATH_CONFIG}/ver.conf"
+    chmod 644 "${PATH_CONFIG}/ver.conf"
+    
+    log_success "Configuration files created"
+    debug_log "type.conf: ${SERVER_TYPE}"
+    debug_log "dns_type.conf: ${DNS_TYPE}"
+    debug_log "test.conf: no (production)"
+    debug_log "ver.conf: ${PIHOLE_VERSION}"
 }
 
 system_update() {
@@ -771,12 +797,25 @@ edns-packet-max=1232
 EOF
     log_success "Generated dnsmasq Unbound configuration"
     
+    # Download initial root hints BEFORE starting Unbound (required for startup)
+    log_info "Downloading DNS root hints (required for Unbound startup)..."
+    mkdir -p /var/lib/unbound
+    if curl --tlsv1.3 -o "${PATH_TEMP}/root.hints" https://www.internic.net/domain/named.root; then
+        mv "${PATH_TEMP}/root.hints" /var/lib/unbound/root.hints
+        chown unbound:unbound /var/lib/unbound/root.hints
+        chmod 644 /var/lib/unbound/root.hints
+        log_success "Downloaded and installed root hints"
+    else
+        log_error "Failed to download root hints - Unbound will not start without this file"
+        return 1
+    fi
+    
     # Disable unbound-resolvconf service
     systemctl disable --now unbound-resolvconf.service 2>/dev/null || true
     sed -Ei 's/^unbound_conf=/#unbound_conf=/' /etc/resolvconf.conf 2>/dev/null || true
     rm -f /etc/unbound/unbound.conf.d/resolvconf_resolvers.conf 2>/dev/null || true
     
-    # Restart unbound
+    # Start unbound (now that root hints exist)
     if service unbound restart; then
         log_success "Unbound service started"
     else
@@ -840,17 +879,6 @@ log_msg "Root hints update completed"
 EOFSCRIPT
     chmod +x "${PATH_FINISHED}/unbound_root_hints_update.sh"
     log_success "Generated Unbound root hints update script"
-    
-    # Run initial root hints download
-    mkdir -p /var/lib/unbound
-    if curl --tlsv1.3 -o "${PATH_TEMP}/root.hints" https://www.internic.net/domain/named.root; then
-        mv "${PATH_TEMP}/root.hints" /var/lib/unbound/root.hints
-        chown unbound:unbound /var/lib/unbound/root.hints
-        chmod 644 /var/lib/unbound/root.hints
-        log_success "Downloaded initial root hints"
-    else
-        log_warning "Failed to download initial root hints"
-    fi
     
     # Schedule quarterly root hints update (every 3 months)
     # Randomize: day 1-5, hour 0-6, minute 0-59, months 1,4,7,10
@@ -1023,11 +1051,6 @@ install_update_scripts() {
     else
         log_warning "Update script may have issues"
     fi
-}
-
-setup_github_authentication() {
-    # Function removed - repository is now public
-    :
 }
 
 setup_cron_jobs() {
@@ -1619,6 +1642,10 @@ main() {
     # Installation steps with state tracking
     if ! skip_if_complete "directories" "directory creation"; then
         create_directories && mark_step_complete "directories"
+    fi
+    
+    if ! skip_if_complete "config_files" "configuration file generation"; then
+        create_config_files && mark_step_complete "config_files"
     fi
     
     if ! skip_if_complete "system_update" "system update"; then

@@ -212,6 +212,7 @@ EOF
 # WireGuard Client Configuration: ${client_name}
 # Created: $(date --iso-8601=seconds)
 # Server: ${server_endpoint}:${server_port}
+# ClientPublicKey: ${public_key}
 
 [Interface]
 PrivateKey = ${private_key}
@@ -444,8 +445,8 @@ list_clients() {
             local ip=$(grep "^Address" "${conf}" | awk '{print $3}' | cut -d'/' -f1)
             local created=$(grep "# Created:" "${conf}" | cut -d' ' -f3)
             
-            # Get client public key from config
-            local client_pubkey=$(grep "^PublicKey" "${conf}" | head -n1 | awk '{print $3}')
+            # Get client public key from config (stored in comment)
+            local client_pubkey=$(grep "^# ClientPublicKey:" "${conf}" | awk '{print $3}')
             
             # Check if client is in server config
             local in_config="No"
