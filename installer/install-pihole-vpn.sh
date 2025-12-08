@@ -744,12 +744,27 @@ install_pihole() {
 install_unbound() {
     log_info "Installing Unbound recursive DNS resolver..."
     
+    # Download initial root hints BEFORE installing Unbound (required for startup)
+    log_info "Downloading DNS root hints (required for Unbound startup)..."
+    mkdir -p /var/lib/unbound
+    if curl --tlsv1.3 -o "${PATH_TEMP}/root.hints" https://www.internic.net/domain/named.root; then
+        mv "${PATH_TEMP}/root.hints" /var/lib/unbound/root.hints
+        chmod 644 /var/lib/unbound/root.hints
+        log_success "Downloaded and installed root hints"
+    else
+        log_error "Failed to download root hints - Unbound will not start without this file"
+        return 1
+    fi
+    
     if ! apt-get install -y unbound; then
         log_error "Failed to install unbound"
         return 1
     fi
     
     log_success "Unbound installed"
+    
+    # Fix ownership after package installation (unbound user now exists)
+    chown unbound:unbound /var/lib/unbound/root.hints
     
     # Generate Unbound configuration
     log_info "Configuring Unbound..."
@@ -797,25 +812,12 @@ edns-packet-max=1232
 EOF
     log_success "Generated dnsmasq Unbound configuration"
     
-    # Download initial root hints BEFORE starting Unbound (required for startup)
-    log_info "Downloading DNS root hints (required for Unbound startup)..."
-    mkdir -p /var/lib/unbound
-    if curl --tlsv1.3 -o "${PATH_TEMP}/root.hints" https://www.internic.net/domain/named.root; then
-        mv "${PATH_TEMP}/root.hints" /var/lib/unbound/root.hints
-        chown unbound:unbound /var/lib/unbound/root.hints
-        chmod 644 /var/lib/unbound/root.hints
-        log_success "Downloaded and installed root hints"
-    else
-        log_error "Failed to download root hints - Unbound will not start without this file"
-        return 1
-    fi
-    
     # Disable unbound-resolvconf service
     systemctl disable --now unbound-resolvconf.service 2>/dev/null || true
     sed -Ei 's/^unbound_conf=/#unbound_conf=/' /etc/resolvconf.conf 2>/dev/null || true
     rm -f /etc/unbound/unbound.conf.d/resolvconf_resolvers.conf 2>/dev/null || true
     
-    # Start unbound (now that root hints exist)
+    # Start unbound (root hints were downloaded before package installation)
     if service unbound restart; then
         log_success "Unbound service started"
     else

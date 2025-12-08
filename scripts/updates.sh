@@ -60,6 +60,7 @@ version=$(<"$CONFIG/ver.conf")
 # GitHub base URLs
 readonly GH_RAW="https://raw.githubusercontent.com/IcedComputer"
 readonly REPO_BASE="${GH_RAW}/Personal_Contained_Pihole/master"
+readonly REPO_BASE_BINARY="https://github.com/IcedComputer/Personal_Contained_Pihole/raw/refs/heads/main"
 
 # Options
 VERBOSE=0
@@ -998,7 +999,7 @@ download_full_config() {
     sed -i -e "s/\r//g" $TEMPDIR/*.regex 2>/dev/null || true
     
     # Download encrypted country regex
-    download_gpg_file "${REPO_BASE}/lists/regex/country.regex.gpg" "$TEMPDIR/country.regex" || {
+    download_gpg_file "${REPO_BASE_BINARY}/lists/regex/country.regex.gpg" "$TEMPDIR/country.regex" || {
         log "ERROR: Failed to download/decrypt country.regex.gpg"
         log "ERROR: This is likely a GPG key issue"
         return 1
@@ -1034,12 +1035,12 @@ download_security_config() {
     
     # Download encrypted files
     debug_log "download_security_config: Downloading encrypted regex files"
-    if ! download_gpg_file "${REPO_BASE}/Regex%20Files/basic_country.regex.gpg" "$TEMPDIR/basic_country.regex"; then
+    if ! download_gpg_file "${REPO_BASE_BINARY}/lists/regex/basic_country.regex.gpg" "$TEMPDIR/basic_country.regex"; then
         log_warning "Failed to download basic_country.regex.gpg, creating empty file"
         touch "$TEMPDIR/basic_country.regex" || log_error "Cannot create basic_country.regex"
     fi
     
-    if ! download_gpg_file "${REPO_BASE}/Regex%20Files/encrypted.regex.gpg" "$TEMPDIR/encrypted.regex"; then
+    if ! download_gpg_file "${REPO_BASE_BINARY}/lists/regex/encrypted.regex.gpg" "$TEMPDIR/encrypted.regex"; then
         log_warning "Failed to download encrypted.regex.gpg, creating empty file"
         touch "$TEMPDIR/encrypted.regex" || log_error "Cannot create encrypted.regex"
     fi
@@ -1074,12 +1075,12 @@ download_test_lists() {
         touch "$TEMPDIR/test.regex" || log_error "Cannot create test.regex"
     fi
     
-    if ! download_gpg_file "${REPO_BASE}/lists/test-files/test.allow.gpg" "$TEMPDIR/test.allow.temp"; then
+    if ! download_gpg_file "${REPO_BASE_BINARY}/lists/test-files/test.allow.gpg" "$TEMPDIR/test.allow.temp"; then
         log_warning "Failed to download test.allow.gpg, creating empty file"
         touch "$TEMPDIR/test.allow.temp" || log_error "Cannot create test.allow.temp"
     fi
     
-    if ! download_gpg_file "${REPO_BASE}/lists/test-files/test.block.encrypt.gpg" "$TEMPDIR/test.block.encrypt.temp"; then
+    if ! download_gpg_file "${REPO_BASE_BINARY}/lists/test-files/test.block.encrypt.gpg" "$TEMPDIR/test.block.encrypt.temp"; then
         log_warning "Failed to download test.block.encrypt.gpg, creating empty file"
         touch "$TEMPDIR/test.block.encrypt.temp" || log_error "Cannot create test.block.encrypt.temp"
     fi
@@ -1148,7 +1149,7 @@ download_encrypted_allowlists() {
     for list in "${encrypted_lists[@]}"; do
         debug_log "download_encrypted_allowlists: Downloading ${list}.allow.gpg"
         (
-            if ! download_gpg_file "${REPO_BASE}/lists/allow/${list}.allow.gpg" "$TEMPDIR/${list}.allow.temp"; then
+            if ! download_gpg_file "${REPO_BASE_BINARY}/lists/allow/${list}.allow.gpg" "$TEMPDIR/${list}.allow.temp"; then
                 log "WARNING: Failed to download ${list}.allow.gpg, creating empty file"
                 touch "$TEMPDIR/${list}.allow.temp" 2>/dev/null
             fi
@@ -1168,7 +1169,7 @@ download_regex_allowlists() {
     log "Downloading regex allow lists..."
     debug_log "download_regex_allowlists: Starting"
     
-    if ! download_file "${REPO_BASE}/Allow%20Lists/regex.allow" "$TEMPDIR/regex.allow.regex.temp"; then
+    if ! download_file "${REPO_BASE}/lists/allow/regex.allow" "$TEMPDIR/regex.allow.regex.temp"; then
         log "WARNING: Failed to download regex.allow, creating empty file"
         touch "$TEMPDIR/regex.allow.regex.temp" || log "ERROR: Cannot create regex.allow.regex.temp"
     fi
@@ -1178,7 +1179,7 @@ download_regex_allowlists() {
         touch "$TEMPDIR/allow_wild.allow.regex.temp" || log "WARNING: Cannot create allow_wild.allow.regex.temp"
     fi
     
-    if ! download_gpg_file "${REPO_BASE}/Allow%20Lists/encrypt.regex.allow.gpg" "$TEMPDIR/encrypt.regex.allow.regex.temp"; then
+    if ! download_gpg_file "${REPO_BASE_BINARY}/lists/allow/encrypt.regex.allow.gpg" "$TEMPDIR/encrypt.regex.allow.regex.temp"; then
         log "WARNING: Failed to download/decrypt encrypt.regex.allow.gpg, creating empty file"
         touch "$TEMPDIR/encrypt.regex.allow.regex.temp" || log "ERROR: Cannot create encrypt.regex.allow.regex.temp"
     fi
@@ -1198,7 +1199,7 @@ download_encrypted_blocklists() {
     for list in "${block_lists[@]}"; do
         debug_log "download_encrypted_blocklists: Downloading ${list}.block.encrypt.gpg"
         (
-            if ! download_gpg_file "${REPO_BASE}/lists/blocks/${list}.block.encrypt.gpg" "$TEMPDIR/${list}.block.encrypt.temp"; then
+            if ! download_gpg_file "${REPO_BASE_BINARY}/lists/blocks/${list}.block.encrypt.gpg" "$TEMPDIR/${list}.block.encrypt.temp"; then
                 log "WARNING: Failed to download ${list}.block.encrypt.gpg, creating empty file"
                 touch "$TEMPDIR/${list}.block.encrypt.temp" 2>/dev/null
             fi
