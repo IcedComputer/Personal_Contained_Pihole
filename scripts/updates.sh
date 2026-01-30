@@ -3,7 +3,7 @@
 # Pi-hole Update Manager
 # File: updates.sh
 # Created: 2020-07-25
-# Last Modified: 2025-12-07
+# Last Modified: 2026-01-29
 # Version: 2.0.0
 #
 # Description: Automated update manager for Pi-hole configurations
@@ -39,6 +39,18 @@
 #
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
+# Trap to ensure cleanup runs on exit, error, or interrupt
+trap 'cleanup_on_exit' EXIT ERR INT TERM
+
+cleanup_on_exit() {
+    local exit_code=$?
+    # Only run cleanup if TEMPDIR is set and exists
+    if [[ -n "${TEMPDIR:-}" && -d "${TEMPDIR:-}" ]]; then
+        rm -rf "${TEMPDIR:?}"/* 2>/dev/null || true
+    fi
+    exit $exit_code
+}
 
 #======================================================================================
 # CONFIGURATION
@@ -490,6 +502,13 @@ update_allow_regex_v5() {
         return 0
     fi
     
+    # Check if file has content (not empty)
+    if [[ ! -s "$file" ]]; then
+        log "Allow regex file is empty, skipping"
+        debug_log "update_allow_regex_v5: File exists but is empty, skipping"
+        return 0
+    fi
+    
     debug_log "update_allow_regex_v5: File found, size: $(stat -c%s "$file" 2>/dev/null || echo 'unknown') bytes"
     
     print_banner green "Starting Allow Regex List (v5)"
@@ -669,6 +688,13 @@ update_allow_regex_v6() {
     if [[ ! -f "$file" ]]; then
         log "No allow regex file found, skipping"
         debug_log "update_allow_regex_v6: File does not exist, skipping"
+        return 0
+    fi
+    
+    # Check if file has content (not empty)
+    if [[ ! -s "$file" ]]; then
+        log "Allow regex file is empty, skipping"
+        debug_log "update_allow_regex_v6: File exists but is empty, skipping"
         return 0
     fi
     
@@ -1307,23 +1333,95 @@ download_encrypted_blocklists() {
 
 assemble_and_deploy() {
     log "Assembling and deploying configurations..."
+    debug_log "assemble_and_deploy: Starting file assembly"
     
-    # Assemble final files
-    cat $TEMPDIR/*.allow.regex.temp 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$TEMPDIR/final.allow.regex.temp"
+    # Assemble allow regex files with proper glob handling
+    debug_log "assemble_and_deploy: Assembling allow regex lists"
+    : > "$TEMPDIR/final.allow.regex.temp"
     
-    cat $TEMPDIR/*.allow.temp 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$TEMPDIR/final.allow.temp"
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "assemble_and_deploy: Processing allow regex: $file"
+            cat "$file" >> "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.regex.temp' -print0 2>/dev/null)
     
-    cat $TEMPDIR/*.regex 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$TEMPDIR/regex.list"
+    if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
+        grep -v '^#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$TEMPDIR/final.allow.regex.temp"
+        rm -f "$TEMPDIR/final.allow.regex.temp.raw"
+        debug_log "assemble_and_deploy: Allow regex assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp" 2>/dev/null || echo 0) entries"
+    else
+        debug_log "assemble_and_deploy: No allow regex files found"
+    fi
     
-    cat $TEMPDIR/*.block.encrypt.temp 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$CONFIG/encrypt.list"
+    # Assemble allow lists with proper glob handling
+    debug_log "assemble_and_deploy: Assembling allow lists"
+    : > "$TEMPDIR/final.allow.temp"
+    
+    while IFS= read -r -d '' file; do
+        # Skip .allow.regex.temp files
+        if [[ "$file" == *.allow.regex.temp ]]; then
+            continue
+        fi
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "assemble_and_deploy: Processing allow: $file"
+            cat "$file" >> "$TEMPDIR/final.allow.temp.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.temp' -print0 2>/dev/null)
+    
+    if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
+        grep -v '^#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$TEMPDIR/final.allow.temp"
+        rm -f "$TEMPDIR/final.allow.temp.raw"
+        debug_log "assemble_and_deploy: Allow list assembled: $(wc -l < "$TEMPDIR/final.allow.temp" 2>/dev/null || echo 0) entries"
+    else
+        debug_log "assemble_and_deploy: No allow files found"
+    fi
+    
+    # Assemble regex block lists with proper glob handling
+    debug_log "assemble_and_deploy: Assembling regex block lists"
+    : > "$TEMPDIR/regex.list"
+    
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "assemble_and_deploy: Processing regex: $file"
+            cat "$file" >> "$TEMPDIR/regex.list.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.regex' -print0 2>/dev/null)
+    
+    if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
+        grep -v '^#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$TEMPDIR/regex.list"
+        rm -f "$TEMPDIR/regex.list.raw"
+        debug_log "assemble_and_deploy: Regex list assembled: $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
+    else
+        debug_log "assemble_and_deploy: No regex files found"
+    fi
+    
+    # Assemble encrypted block lists with proper glob handling
+    debug_log "assemble_and_deploy: Assembling encrypted block lists"
+    : > "$CONFIG/encrypt.list"
+    
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "assemble_and_deploy: Processing block: $file"
+            cat "$file" >> "$CONFIG/encrypt.list.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.block.encrypt.temp' -print0 2>/dev/null)
+    
+    if [[ -f "$CONFIG/encrypt.list.raw" && -s "$CONFIG/encrypt.list.raw" ]]; then
+        grep -v '^#' "$CONFIG/encrypt.list.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$CONFIG/encrypt.list"
+        rm -f "$CONFIG/encrypt.list.raw"
+        debug_log "assemble_and_deploy: Encrypt list assembled: $(wc -l < "$CONFIG/encrypt.list" 2>/dev/null || echo 0) entries"
+    else
+        debug_log "assemble_and_deploy: No encrypted block files found"
+    fi
     
     # Deploy files
     debug_log "assemble_and_deploy: Deploying configuration files"
@@ -1372,17 +1470,42 @@ assemble_and_deploy() {
 
 assemble_and_deploy_regex_only() {
     log "Assembling and deploying regex configurations..."
+    debug_log "assemble_and_deploy_regex_only: Starting"
     
-    # Assemble only regex block lists
-    cat $TEMPDIR/*.regex 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$TEMPDIR/regex.list"
+    # Assemble only regex block lists with proper glob handling
+    : > "$TEMPDIR/regex.list"
+    
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "assemble_and_deploy_regex_only: Processing: $file"
+            cat "$file" >> "$TEMPDIR/regex.list.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.regex' -print0 2>/dev/null)
+    
+    if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
+        grep -v '^#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$TEMPDIR/regex.list"
+        rm -f "$TEMPDIR/regex.list.raw"
+        debug_log "assemble_and_deploy_regex_only: Assembled $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
+    else
+        log_warning "No regex files found to assemble"
+    fi
     
     # Deploy regex file
-    mv "$TEMPDIR/regex.list" "$PIDIR/regex.list"
+    if [[ -f "$TEMPDIR/regex.list" && -s "$TEMPDIR/regex.list" ]]; then
+        mv "$TEMPDIR/regex.list" "$PIDIR/regex.list" || {
+            log_error "Failed to deploy regex.list"
+            DEPLOY_ERRORS+=("DEPLOY FAILED: regex.list")
+        }
+    else
+        log_warning "No regex content to deploy"
+    fi
     
     # Update database with regex only (integrated functionality)
     update_pihole_database_regex_only
+    
+    debug_log "assemble_and_deploy_regex_only: Completed"
 }
 
 restart_services() {
@@ -1400,7 +1523,23 @@ restart_services() {
 
 cleanup() {
     log "Cleaning up temporary files..."
-    rm -f $TEMPDIR/*.regex $TEMPDIR/*.temp $TEMPDIR/*.gpg 2>/dev/null || true
+    debug_log "cleanup: Removing all files from $TEMPDIR"
+    
+    # Remove all common temp file types
+    rm -f "$TEMPDIR"/*.regex 2>/dev/null || true
+    rm -f "$TEMPDIR"/*.temp 2>/dev/null || true
+    rm -f "$TEMPDIR"/*.gpg 2>/dev/null || true
+    rm -f "$TEMPDIR"/*.sql 2>/dev/null || true
+    rm -f "$TEMPDIR"/*.log 2>/dev/null || true
+    rm -f "$TEMPDIR"/*.list 2>/dev/null || true
+    rm -f "$TEMPDIR"/*.sh 2>/dev/null || true
+    
+    # Clean any remaining files in temp directory
+    if [[ -d "$TEMPDIR" ]]; then
+        rm -rf "$TEMPDIR"/* 2>/dev/null || true
+    fi
+    
+    debug_log "cleanup: Temp directory cleaned"
 }
 
 purge_database() {
@@ -1489,6 +1628,9 @@ cmd_refresh() {
     
     log "Script refresh completed: $deployed deployed, $failed failed"
     
+    # Cleanup temp files
+    cleanup
+    
     # Show error summary
     show_error_summary
 }
@@ -1542,6 +1684,7 @@ cmd_full_update() {
 
 cmd_allow_update() {
     log "=== Starting allow list update ==="
+    debug_log "cmd_allow_update: Starting"
     
     if [[ "$Type" == "security" ]]; then
         download_security_allowlists
@@ -1551,17 +1694,69 @@ cmd_allow_update() {
     download_regex_allowlists
     download_encrypted_allowlists
     
-    # Assemble allow lists
-    cat $TEMPDIR/*.allow.regex.temp 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$TEMPDIR/final.allow.regex.temp"
+    # Assemble allow regex lists with proper glob handling
+    debug_log "cmd_allow_update: Assembling allow regex lists"
     
-    cat $TEMPDIR/*.allow.temp 2>/dev/null | \
-        grep -v '#' | grep -v '^$' | grep -v '^[[:space:]]*$' | \
-        sort | uniq > "$TEMPDIR/final.allow.temp"
+    # Initialize empty final file
+    : > "$TEMPDIR/final.allow.regex.temp"
+    
+    # Use find to safely handle glob patterns (avoids issues when no files match)
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "cmd_allow_update: Processing regex file: $file"
+            cat "$file" >> "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.regex.temp' -print0 2>/dev/null)
+    
+    # Filter and dedupe if we have content
+    if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
+        grep -v '^#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$TEMPDIR/final.allow.regex.temp"
+        rm -f "$TEMPDIR/final.allow.regex.temp.raw"
+        debug_log "cmd_allow_update: Allow regex patterns assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp") entries"
+    else
+        debug_log "cmd_allow_update: No allow regex files found to assemble"
+    fi
+    
+    # Assemble regular allow lists with proper glob handling
+    debug_log "cmd_allow_update: Assembling allow lists"
+    
+    # Initialize empty final file
+    : > "$TEMPDIR/final.allow.temp"
+    
+    # Use find to safely handle glob patterns
+    while IFS= read -r -d '' file; do
+        # Skip files that end with .regex.temp (already processed above)
+        if [[ "$file" == *.allow.regex.temp ]]; then
+            continue
+        fi
+        if [[ -f "$file" && -s "$file" ]]; then
+            debug_log "cmd_allow_update: Processing allow file: $file"
+            cat "$file" >> "$TEMPDIR/final.allow.temp.raw" 2>/dev/null
+        fi
+    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.temp' -print0 2>/dev/null)
+    
+    # Filter and dedupe if we have content
+    if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
+        grep -v '^#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
+            grep -v '^$' | grep -v '^[[:space:]]*$' | \
+            sort | uniq > "$TEMPDIR/final.allow.temp"
+        rm -f "$TEMPDIR/final.allow.temp.raw"
+        debug_log "cmd_allow_update: Allow domains assembled: $(wc -l < "$TEMPDIR/final.allow.temp") entries"
+    else
+        debug_log "cmd_allow_update: No allow files found to assemble"
+    fi
     
     # Deploy allow lists
-    mv "$TEMPDIR/final.allow.temp" "$PIDIR/whitelist.txt"
+    if [[ -f "$TEMPDIR/final.allow.temp" && -s "$TEMPDIR/final.allow.temp" ]]; then
+        mv "$TEMPDIR/final.allow.temp" "$PIDIR/whitelist.txt" || {
+            log_error "Failed to deploy whitelist.txt"
+            DEPLOY_ERRORS+=("DEPLOY FAILED: whitelist.txt")
+        }
+    else
+        log_warning "No allow list content to deploy"
+    fi
     
     # Update database with allow lists only (integrated functionality)
     update_pihole_database_allow_only
@@ -1570,6 +1765,7 @@ cmd_allow_update() {
     cleanup
     
     log "=== Allow list update completed ==="
+    debug_log "cmd_allow_update: Completed"
     
     # Show error summary
     show_error_summary
