@@ -13,7 +13,7 @@ Automated installer for Pi-hole DNS ad-blocking with WireGuard VPN on Raspberry 
 ### Key Features
 
 - ✅ **One-Command Installation** - Interactive or fully unattended setup
-- ✅ **Multiple DNS Providers** - Choose Unbound (recursive) or Cloudflared (DoH)
+- ✅ **Recursive DNS** - Unbound for maximum privacy (no third-party logging)
 - ✅ **WireGuard VPN** - Optional VPN with easy client management
 - ✅ **Security Hardening** - SSH hardening, Fail2Ban with progressive banning, MFA support
 - ✅ **Automated Updates** - Scheduled list updates and maintenance scripts
@@ -169,31 +169,17 @@ SERVER_TYPE="basic"
 
 ---
 
-## DNS Provider Options
+## DNS Configuration
 
-### Unbound (Recommended for Privacy)
+### Unbound Recursive DNS
 
 - **Local recursive DNS resolver**
 - **Port:** 5335 (localhost only)
 - **Privacy:** Queries go directly to root DNS servers
 - **No third-party logging**
-- **Best for:** Maximum privacy
+- **Best for:** Maximum privacy and control
 
-```bash
-DNS_TYPE="unbound"
-```
-
-### Cloudflared (Recommended for Speed)
-
-- **DNS over HTTPS (DoH)**
-- **Port:** 5053 (localhost only)
-- **Provider:** Cloudflare 1.1.1.1
-- **Encrypted DNS queries**
-- **Best for:** Speed and reliability
-
-```bash
-DNS_TYPE="cloudflared"
-```
+Unbound is automatically installed and configured. No configuration needed.
 
 ---
 
@@ -299,11 +285,8 @@ sudo bash /scripts/Finished/wireguard-manager.sh
 # Pi-hole FTL
 sudo systemctl status pihole-FTL
 
-# Unbound (if using Unbound)
+# Unbound DNS resolver
 sudo systemctl status unbound
-
-# Cloudflared (if using Cloudflared)
-sudo systemctl status cloudflared
 
 # WireGuard (if installed)
 sudo systemctl status wg-quick@wg0
@@ -341,8 +324,8 @@ dig @127.0.0.1 example.com +trace
 # Verify Pi-hole is listening on port 53
 sudo netstat -tulpn | grep :53
 
-# Check Unbound/Cloudflared
-sudo netstat -tulpn | grep -E "5335|5053"
+# Check Unbound
+sudo netstat -tulpn | grep :5335
 
 # WireGuard status
 sudo wg show
@@ -366,7 +349,7 @@ sudo rm -rf /etc/wireguard
 sudo crontab -r
 
 # Optional: Remove packages
-sudo apt-get remove --purge pihole-FTL cloudflared unbound wireguard fail2ban
+sudo apt-get remove --purge pihole-FTL unbound wireguard fail2ban
 ```
 
 ---
@@ -412,7 +395,7 @@ This project consolidates and enhances multiple Pi-hole deployment tools into a 
 - ✅ WireGuard VPN with hostname resolution (addn-hosts)
 - ✅ VPN client manager with 10 menu options including file locations
 - ✅ Three installation profiles (full, security, basic)
-- ✅ Two DNS providers (Unbound, Cloudflared)
+- ✅ Unbound recursive DNS for privacy
 - ✅ Security hardening (SSH, MFA, unattended-upgrades)
 - ✅ Automated maintenance with randomized cron schedules
 - ✅ TLS 1.3 enforcement for all downloads

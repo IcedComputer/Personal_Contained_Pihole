@@ -697,7 +697,9 @@ update_adlists() {
     local id=1
     while IFS= read -r url; do
         [[ -z "$url" ]] && continue
-        sqlite3 "$GRAVITY_DB" "INSERT INTO adlist (id, address, enabled) VALUES($id, '$url', 1)" 2>/dev/null || {
+        # Escape single quotes for SQL safety (defense in depth)
+        local escaped_url="${url//\'/\'\'}"
+        sqlite3 "$GRAVITY_DB" "INSERT INTO adlist (id, address, enabled) VALUES($id, '$escaped_url', 1)" 2>/dev/null || {
             log "WARNING: Failed to insert adlist: $url"
             continue
         }

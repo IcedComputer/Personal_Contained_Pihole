@@ -169,10 +169,10 @@ manual_add_client() {
     
     # Get server endpoint (public IP)
     local server_endpoint
-    # Try multiple methods to get public IP
-    server_endpoint=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || \
-                      curl -s --max-time 5 https://icanhazip.com 2>/dev/null || \
-                      curl -s --max-time 5 https://ifconfig.me 2>/dev/null)
+    # Try multiple methods to get public IP (TLS 1.3 enforced for security)
+    server_endpoint=$(curl -s --tlsv1.3 --max-time 5 https://api.ipify.org 2>/dev/null || \
+                      curl -s --tlsv1.3 --max-time 5 https://icanhazip.com 2>/dev/null || \
+                      curl -s --tlsv1.3 --max-time 5 https://ifconfig.me 2>/dev/null)
     
     if [[ -z "${server_endpoint}" ]]; then
         log_warning "Could not detect public IP automatically"

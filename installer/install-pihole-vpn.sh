@@ -125,6 +125,51 @@ debug_log() {
     fi
 }
 
+wait_for_user() {
+    # Prompt user to confirm a step is complete before proceeding
+    local step_name="$1"
+    local prompt_message="${2:-Is ${step_name} complete?}"
+    
+    echo ""
+    echo -e "${COLOR_YELLOW}╔══════════════════════════════════════════════════════════════╗${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}║                    CONFIRMATION REQUIRED                      ║${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}╚══════════════════════════════════════════════════════════════╝${COLOR_RESET}"
+    echo ""
+    echo -e "${COLOR_BLUE}Step completed:${COLOR_RESET} ${step_name}"
+    echo ""
+    
+    while true; do
+        read -p "${prompt_message} [y/n]: " confirm
+        case ${confirm,,} in
+            y|yes)
+                log_success "${step_name} confirmed complete"
+                echo ""
+                return 0
+                ;;
+            n|no)
+                echo ""
+                log_warning "User indicated ${step_name} is NOT complete"
+                echo "Please complete the step manually, then try again."
+                echo "You may need to troubleshoot before continuing."
+                echo ""
+                read -p "Try again? [y] or abort installation? [n]: " retry
+                case ${retry,,} in
+                    y|yes|"")
+                        continue
+                        ;;
+                    *)
+                        log_error "Installation aborted by user at: ${step_name}"
+                        exit 1
+                        ;;
+                esac
+                ;;
+            *)
+                echo "Please enter 'y' or 'n'"
+                ;;
+        esac
+    done
+}
+
 mark_step_complete() {
     local step="$1"
     echo "${step}" >> "${STATE_FILE}"
@@ -391,6 +436,11 @@ load_config_file() {
         return 1
     fi
     
+    # Set defaults for optional variables
+    WIREGUARD_PORT="${WIREGUARD_PORT:-51820}"
+    STATIC_IPV4="${STATIC_IPV4:-${DETECTED_IPV4}}"
+    ENABLE_MFA="${ENABLE_MFA:-no}"
+    
     log_success "Configuration loaded successfully"
     return 0
 }
@@ -463,7 +513,9 @@ prompt_configuration() {
     fi
     log_success "VPN installation: ${INSTALL_VPN}"
     
-    # WireGuard Port
+    # WireGuard Port (set default even if not installing VPN, for config display)
+    WIREGUARD_PORT="51820"
+    
     if [[ "${INSTALL_VPN}" == "yes" ]]; then
         echo ""
         read -p "WireGuard port [51820]: " wg_port
@@ -592,6 +644,7 @@ install_dependencies() {
         "git"
         "sqlite3"
         "vim"
+        "gnupg"
         "unattended-upgrades"
         "fail2ban"
         "whiptail"
@@ -1079,7 +1132,8 @@ setup_cron_jobs() {
         crontab -l 2>/dev/null
         echo "# Pi-hole automated updates (installed $(date --iso-8601))"
         echo "${purge_minute} ${purge_hour} * * * bash ${PATH_FINISHED}/updates.sh purge-and-update >> /var/log/pihole-purge-update.log 2>&1"
-        echo "${allow_minute1} ${allow_hour1},${allow_hour2} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
+        echo "${allow_minute1} ${allow_hour1} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
+        echo "${allow_minute2} ${allow_hour2} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
         echo "${refresh_minute} ${refresh_hour} * * * bash ${PATH_FINISHED}/updates.sh refresh >> /var/log/pihole-refresh.log 2>&1"
         echo "${reboot_minute} ${reboot_hour} * * * /sbin/reboot >> /var/log/pihole-reboot.log 2>&1"
     ) | crontab -
@@ -1380,7 +1434,7 @@ EOF
     systemctl enable fail2ban
     if systemctl restart fail2ban; then
         log_success "Fail2Ban started with progressive banning"
-        log_info "Ban progression: 3 attempts → 25 min | 3 bans/24h → 7 days | 2 recidive → permanent"
+        log_info "Ban progression: 3 attempts/24h → 25 min | 3 bans/90d → 7 days | 2 recidive/1y → permanent"
     else
         log_error "Failed to restart Fail2Ban"
     fi
@@ -1642,7 +1696,11 @@ main() {
     # Detect real user (before any user-specific operations)
     detect_real_user
     
-    # Installation steps with state tracking
+    # ========================================================================
+    # PHASE 1: System Preparation
+    # ========================================================================
+    log_info "=== PHASE 1: System Preparation ==="
+    
     if ! skip_if_complete "directories" "directory creation"; then
         create_directories && mark_step_complete "directories"
     fi
@@ -1659,6 +1717,13 @@ main() {
         install_dependencies && mark_step_complete "dependencies"
     fi
     
+    wait_for_user "System Preparation (updates & dependencies)" "System updates and dependencies installed. Ready to proceed?"
+    
+    # ========================================================================
+    # PHASE 2: Security Configuration
+    # ========================================================================
+    log_info "=== PHASE 2: Security Configuration ==="
+    
     if ! skip_if_complete "unattended_upgrades" "unattended upgrades"; then
         setup_unattended_upgrades && mark_step_complete "unattended_upgrades"
     fi
@@ -1672,7 +1737,13 @@ main() {
         harden_ssh && mark_step_complete "ssh_hardening"
     fi
     
-    # GPG Setup
+    wait_for_user "Security Configuration (Fail2Ban, SSH)" "Security hardening complete. Ready to proceed?"
+    
+    # ========================================================================
+    # PHASE 3: GPG Key Setup
+    # ========================================================================
+    log_info "=== PHASE 3: GPG Key Setup ==="
+    
     if ! skip_if_complete "gpg_download" "GPG public key download"; then
         download_public_gpg_keys && mark_step_complete "gpg_download"
     fi
@@ -1685,17 +1756,48 @@ main() {
         import_gpg_keys && mark_step_complete "gpg_import"
     fi
     
-    # Core installation
+    wait_for_user "GPG Key Setup" "GPG keys configured. Ready to install Pi-hole?"
+    
+    # ========================================================================
+    # PHASE 4: Pi-hole Installation (INTERACTIVE)
+    # ========================================================================
+    log_info "=== PHASE 4: Pi-hole Installation ==="
+    echo ""
+    echo -e "${COLOR_YELLOW}╔══════════════════════════════════════════════════════════════╗${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}║           PI-HOLE INTERACTIVE INSTALLATION                   ║${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}╚══════════════════════════════════════════════════════════════╝${COLOR_RESET}"
+    echo ""
+    echo "The Pi-hole installer will now run interactively."
+    echo "Follow the prompts to complete Pi-hole setup."
+    echo ""
+    echo "IMPORTANT: When prompted for upstream DNS, select any option."
+    echo "           We will configure Unbound as the DNS resolver next."
+    echo ""
+    read -p "Press ENTER to start the Pi-hole installer..."
+    echo ""
+    
     if ! skip_if_complete "pihole" "Pi-hole installation"; then
-        install_pihole && mark_step_complete "pihole"
+        install_pihole
+        wait_for_user "Pi-hole Installation" "Is the Pi-hole installation FULLY COMPLETE?"
+        mark_step_complete "pihole"
     fi
     
-    # DNS Provider - Always Unbound
+    # ========================================================================
+    # PHASE 5: Unbound DNS Resolver
+    # ========================================================================
+    log_info "=== PHASE 5: Unbound DNS Resolver ==="
+    
     if ! skip_if_complete "dns_provider" "DNS provider setup"; then
         install_unbound && mark_step_complete "dns_provider"
     fi
     
-    # Update scripts
+    wait_for_user "Unbound DNS Resolver" "Unbound installed and configured. Ready to proceed?"
+    
+    # ========================================================================
+    # PHASE 6: Update Scripts & Cron Jobs
+    # ========================================================================
+    log_info "=== PHASE 6: Update Scripts & Cron Jobs ==="
+    
     if ! skip_if_complete "update_scripts" "update scripts installation"; then
         install_update_scripts && mark_step_complete "update_scripts"
     fi
@@ -1704,12 +1806,28 @@ main() {
         setup_cron_jobs && mark_step_complete "cron_jobs"
     fi
     
-    # VPN
-    if ! skip_if_complete "wireguard" "WireGuard VPN"; then
-        install_wireguard && mark_step_complete "wireguard"
+    wait_for_user "Update Scripts & Cron Jobs" "Scripts and cron jobs configured. Ready to proceed?"
+    
+    # ========================================================================
+    # PHASE 7: WireGuard VPN (if requested)
+    # ========================================================================
+    if [[ "${INSTALL_VPN}" == "yes" ]]; then
+        log_info "=== PHASE 7: WireGuard VPN ==="
+        
+        if ! skip_if_complete "wireguard" "WireGuard VPN"; then
+            install_wireguard && mark_step_complete "wireguard"
+        fi
+        
+        wait_for_user "WireGuard VPN" "WireGuard VPN installed. Ready to proceed?"
+    else
+        log_info "=== PHASE 7: WireGuard VPN (SKIPPED - not requested) ==="
     fi
     
-    # Finalization
+    # ========================================================================
+    # PHASE 8: Finalization
+    # ========================================================================
+    log_info "=== PHASE 8: Finalization ==="
+    
     if ! skip_if_complete "dns_config" "server DNS configuration"; then
         configure_server_dns && mark_step_complete "dns_config"
     fi

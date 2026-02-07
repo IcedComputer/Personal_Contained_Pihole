@@ -822,18 +822,15 @@ The `updates.sh` script uses SQL batch operations for 100x performance improveme
 |-----------|-----|-----|---------|
 | Pi-hole FTL | 50-100 MB | 1-5% | 100 MB |
 | Unbound | 30-50 MB | 1-3% | 50 MB |
-| Cloudflared | 20-40 MB | 1-2% | 20 MB |
 | WireGuard | 5-10 MB | <1% | 10 MB |
 
-**Total (Full Stack):** ~150-200 MB RAM, minimal CPU
+**Total (Full Stack):** ~100-160 MB RAM, minimal CPU
 
 ### Network Performance
 
 **DNS Query Times:**
 - Unbound (cached): <1 ms
 - Unbound (uncached): 50-200 ms
-- Cloudflared (cached): <1 ms
-- Cloudflared (uncached): 10-30 ms
 
 **WireGuard Performance:**
 - Throughput: Near-line-speed (limited by CPU/network)
@@ -901,10 +898,8 @@ pihole uninstall
 # Remove WireGuard
 sudo apt remove --purge wireguard wireguard-tools
 
-# Remove Unbound or Cloudflared
+# Remove Unbound
 sudo apt remove --purge unbound
-# or
-sudo apt remove --purge cloudflared
 
 # Remove scripts
 sudo rm -rf /scripts/
@@ -925,13 +920,6 @@ sudo apt remove --purge wireguard wireguard-tools
 sudo rm -rf /etc/wireguard/
 ```
 
-**Switch DNS provider:**
-```bash
-# From Unbound to Cloudflared
-sudo apt remove --purge unbound
-# Re-run installer with DNS_TYPE="cloudflared"
-```
-
 ---
 
 ## Support and Documentation
@@ -940,9 +928,7 @@ sudo apt remove --purge unbound
 
 - **Pi-hole**: https://docs.pi-hole.net/
 - **WireGuard**: https://www.wireguard.com/
-- **PiVPN**: https://pivpn.io/
 - **Unbound**: https://nlnetlabs.nl/documentation/unbound/
-- **Cloudflared**: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
 
 ### Related Repositories
 
@@ -965,7 +951,7 @@ sudo apt remove --purge unbound
 **Initial Release:**
 - Automated Pi-hole installation for Raspberry Pi and Ubuntu Server
 - Platform auto-detection (Azure, RPi, other)
-- Unbound and Cloudflared DNS provider support
+- Unbound recursive DNS for privacy (no third-party logging)
 - Modern WireGuard VPN implementation (secure, not relying on unmaintained PiVPN)
 - Post-quantum cryptography support (pre-shared keys)
 - GPG key generation and import
