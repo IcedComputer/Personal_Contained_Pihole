@@ -14,7 +14,7 @@ Automated installer for Pi-hole DNS ad blocker with WireGuard VPN support. This 
 
 - **Automated Installation**: Single-command setup for complete Pi-hole + VPN stack
 - **Platform Detection**: Automatically detects Raspberry Pi, Azure, or generic Linux
-- **Flexible DNS**: Choose between Unbound (recursive) or Cloudflared (DoH)
+- **Recursive DNS**: Uses Unbound for maximum privacy (no third-party DNS providers)
 - **WireGuard VPN**: Optional VPN with modern, secure implementation and user-friendly client management
 - **Configuration Profiles**: Pre-configured security levels (Full, Security, Basic)
 - **GPG Key Management**: Automated key generation and import for encrypted lists
@@ -154,21 +154,6 @@ DNS_TYPE="unbound"
 - More resource intensive
 - Requires periodic root hints updates (automated)
 
-#### Cloudflared (Recommended for Speed)
-```bash
-DNS_TYPE="cloudflared"
-```
-**Advantages:**
-- Fast DNS resolution
-- DNS over HTTPS (encrypted queries)
-- Lower resource usage
-- Cloudflare's 1.1.1.1 infrastructure
-
-**Disadvantages:**
-- Third-party DNS provider (Cloudflare sees queries)
-- Cloudflare privacy policy applies
-- External dependency
-
 ### VPN Options
 
 #### Install WireGuard VPN
@@ -284,8 +269,8 @@ The installer proceeds through these stages:
 1. **System Update** - Updates packages and security patches
 2. **Dependencies** - Installs required tools (curl, git, sqlite3, etc.)
 3. **Pi-hole** - Installs latest Pi-hole version
-4. **DNS Provider** - Configures Unbound or Cloudflared
-5. **Update Scripts** - Downloads and configures `updates_optimized.sh`
+4. **Unbound DNS** - Configures Unbound recursive DNS resolver
+5. **Update Scripts** - Downloads and configures `updates.sh`
 6. **Cron Jobs** - Sets up automated maintenance schedules
 7. **WireGuard** - Installs VPN (if requested)
 8. **Security** - Configures Fail2Ban and unattended upgrades
@@ -605,13 +590,10 @@ sudo systemctl status pihole-FTL
 **Solution:**
 ```bash
 # Restart DNS
-sudo pihole restartdns
+sudo pihole reloaddns
 
 # If using Unbound
 sudo service unbound restart
-
-# If using Cloudflared
-sudo systemctl restart cloudflared
 ```
 
 #### Issue: WireGuard clients cannot connect
@@ -702,7 +684,7 @@ cat /scripts/Finished/CONFIG/type.conf
 
 **dns_type.conf** - DNS provider
 ```bash
-# Contents: "cloudflared" or "unbound" (literal strings, not numeric)
+# Contents: "unbound"
 cat /scripts/Finished/CONFIG/dns_type.conf
 ```
 
@@ -712,12 +694,6 @@ cat /scripts/Finished/CONFIG/dns_type.conf
 cat /scripts/Finished/CONFIG/test.conf
 ```
 
-**ver.conf** - Pi-hole version
-```bash
-# Contents: "6" (Pi-hole major version)
-cat /scripts/Finished/CONFIG/ver.conf
-```
-
 ### DNS Configuration Files
 
 **Unbound Configuration:**
@@ -725,13 +701,6 @@ cat /scripts/Finished/CONFIG/ver.conf
 /etc/unbound/unbound.conf.d/pi-hole.conf    # Unbound Pi-hole config
 /etc/dnsmasq.d/51-unbound.conf              # Dnsmasq upstream config
 /var/lib/unbound/root.hints                 # DNS root servers
-```
-
-**Cloudflared Configuration:**
-```bash
-/scripts/Finished/cloudflared               # Cloudflared settings
-/lib/systemd/system/cloudflared.service     # Systemd service
-/etc/dnsmasq.d/50-cloudflared.conf          # Dnsmasq upstream config
 ```
 
 **WireGuard DNS Configuration:**
@@ -839,11 +808,10 @@ sudo apt update && sudo apt upgrade -y
 
 ### Database Optimization
 
-The `updates_optimized.sh` script uses SQL batch operations for 100x performance improvement over individual `pihole` commands.
+The `updates.sh` script uses SQL batch operations for 100x performance improvement over individual `pihole` commands.
 
 **Performance Metrics:**
-- v5 Database: 500+ seconds → 5 seconds (100x faster)
-- v6 Database: Similar improvement
+- Batch SQL operations: 500+ seconds → 5 seconds (100x faster)
 - Overall update time: 60% reduction
 
 ### Resource Usage

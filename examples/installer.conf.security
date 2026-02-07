@@ -30,9 +30,8 @@ SERVER_TYPE="security"
 # ============================================================================
 # DNS PROVIDER CONFIGURATION
 # ============================================================================
-# Cloudflared: Fast, reliable, DoH encryption
-# Configured for security.cloudflare-dns.com (anti-malware)
-DNS_TYPE="cloudflared"
+# Unbound: Local recursive DNS resolver (maximum privacy)
+DNS_TYPE="unbound"
 
 # ============================================================================
 # VPN CONFIGURATION

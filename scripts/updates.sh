@@ -8,7 +8,7 @@
 #
 # Description: Automated update manager for Pi-hole configurations
 #              Downloads and deploys adlists, regex rules, allow/block lists
-#              Supports both Pi-hole v5 and v6 with GPG encryption
+#              Supports Pi-hole v6 with GPG encryption
 #
 # Following Universal Constants:
 # - UC-001: Code clarity over cleverness
@@ -66,8 +66,10 @@ readonly LOGFILE=/var/log/pihole-updates.log
 # Load configuration files
 Type=$(<"$CONFIG/type.conf")
 test_system=$(<"$CONFIG/test.conf") 
-is_cloudflared=$(<"$CONFIG/dns_type.conf")
-version=$(<"$CONFIG/ver.conf")
+dns_type=$(<"$CONFIG/dns_type.conf")
+
+# Pi-hole version (v6 only supported)
+readonly PIHOLE_VERSION="6"
 
 # GitHub base URLs
 readonly GH_RAW="https://raw.githubusercontent.com/IcedComputer"
@@ -487,195 +489,6 @@ parallel_download() {
 }
 
 #======================================================================================
-# DATABASE UPDATE FUNCTIONS - PI-HOLE VERSION 5
-#======================================================================================
-
-update_allow_regex_v5() {
-    local file="$TEMPDIR/final.allow.regex.temp"
-    
-    debug_log "update_allow_regex_v5: Starting function"
-    debug_log "update_allow_regex_v5: Looking for file: $file"
-    
-    if [[ ! -f "$file" ]]; then
-        log "No allow regex file found, skipping"
-        debug_log "update_allow_regex_v5: File does not exist, skipping"
-        return 0
-    fi
-    
-    # Check if file has content (not empty)
-    if [[ ! -s "$file" ]]; then
-        log "Allow regex file is empty, skipping"
-        debug_log "update_allow_regex_v5: File exists but is empty, skipping"
-        return 0
-    fi
-    
-    debug_log "update_allow_regex_v5: File found, size: $(stat -c%s "$file" 2>/dev/null || echo 'unknown') bytes"
-    
-    print_banner green "Starting Allow Regex List (v5)"
-    
-    local count=0
-    local temp_sql="$TEMPDIR/allow_regex_insert.sql"
-    debug_log "update_allow_regex_v5: Creating SQL file: $temp_sql"
-    
-    echo "BEGIN TRANSACTION;" > "$temp_sql"
-    
-    while IFS= read -r pattern; do
-        [[ -z "$pattern" ]] && continue
-        # Type 2 = regex whitelist, enabled = 1
-        # Escape single quotes for SQL
-        local escaped_pattern="${pattern//\'/\'\'}"
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (2, '${escaped_pattern}', 1);" >> "$temp_sql"
-        ((count++))
-        verbose_log "Queued allow regex: $pattern"
-    done < "$file"
-    
-    debug_log "update_allow_regex_v5: Queued $count regex patterns"
-    echo "COMMIT;" >> "$temp_sql"
-    
-    debug_log "update_allow_regex_v5: Executing SQL transaction"
-    local sql_error="$TEMPDIR/sql_error_regex_v5_$$.log"
-    if ! sqlite3 "$GRAVITY_DB" < "$temp_sql" 2>"$sql_error"; then
-        log "ERROR: Failed to insert allow regex"
-        if [[ -f "$sql_error" ]]; then
-            log "ERROR: SQL error: $(cat "$sql_error")"
-            rm -f "$sql_error"
-        fi
-        return 1
-    fi
-    
-    rm -f "$temp_sql" "$sql_error"
-    log_success "Added $count allow regex patterns via direct SQL (fast)"
-    debug_success "update_allow_regex_v5: Completed successfully"
-    print_banner yellow "Completed Allow Regex List"
-}
-
-update_allow_v5() {
-    local file="$PIDIR/whitelist.txt"
-    
-    debug_log "update_allow_v5: Starting function"
-    debug_log "update_allow_v5: Looking for file: $file"
-    
-    if [[ ! -f "$file" ]]; then
-        log "No whitelist file found, skipping"
-        debug_log "update_allow_v5: File does not exist: $file"
-        return 0
-    fi
-    
-    debug_log "update_allow_v5: File found, size: $(stat -c%s "$file" 2>/dev/null || echo 'unknown') bytes"
-    
-    print_banner green "Starting Allow List (v5)"
-    
-    # Validate database exists
-    if [[ ! -f "$GRAVITY_DB" ]]; then
-        log "ERROR: Gravity database not found: $GRAVITY_DB"
-        debug_log "update_allow_v5: Database missing, aborting"
-        return 1
-    fi
-    debug_log "update_allow_v5: Database exists: $GRAVITY_DB"
-    
-    # Use direct SQL INSERT for massive performance improvement
-    # This is 50-100x faster than calling pihole -w for each domain
-    local count=0
-    local temp_sql="$TEMPDIR/allow_insert.sql"
-    debug_log "update_allow_v5: Creating SQL transaction file: $temp_sql"
-    
-    # Start SQL transaction
-    echo "BEGIN TRANSACTION;" > "$temp_sql" || {
-        log "ERROR: Failed to create SQL transaction file: $temp_sql"
-        debug_log "update_allow_v5: Cannot write to temp directory"
-        return 1
-    }
-    
-    debug_log "update_allow_v5: Reading domains from $file"
-    while IFS= read -r domain; do
-        [[ -z "$domain" ]] && continue
-        # Type 0 = exact whitelist, enabled = 1
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (0, '${domain}', 1);" >> "$temp_sql"
-        ((count++))
-        verbose_log "Queued allow domain: $domain"
-    done < "$file"
-    
-    debug_log "update_allow_v5: Queued $count domains for insertion"
-    echo "COMMIT;" >> "$temp_sql"
-    
-    local sql_size=$(stat -c%s "$temp_sql" 2>/dev/null || echo '0')
-    debug_log "update_allow_v5: SQL file size: $sql_size bytes"
-    debug_log "update_allow_v5: Executing SQL transaction"
-    
-    # Execute all inserts in one transaction
-    local sql_error="$TEMPDIR/sql_error_v5_$$.log"
-    if ! sqlite3 "$GRAVITY_DB" < "$temp_sql" 2>"$sql_error"; then
-        log "ERROR: Failed to insert allow list"
-        if [[ -f "$sql_error" ]]; then
-            local error_msg=$(cat "$sql_error")
-            log "ERROR: SQL error: $error_msg"
-            SQL_ERRORS+=("SQL FAILED (v5 allow): $error_msg")
-            rm -f "$sql_error"
-        else
-            SQL_ERRORS+=("SQL FAILED (v5 allow): Unknown error")
-        fi
-        debug_log "update_allow_v5: SQL execution failed, keeping $temp_sql for inspection"
-        return 1
-    fi
-    
-    rm -f "$temp_sql" "$sql_error"
-    log_success "Added $count allow domains via direct SQL (fast)"
-    debug_success "update_allow_v5: Completed successfully"
-    print_banner yellow "Completed Allow List"
-}
-
-update_regex_v5() {
-    local file="$PIDIR/regex.list"
-    
-    debug_log "update_regex_v5: Starting function"
-    debug_log "update_regex_v5: Looking for file: $file"
-    
-    if [[ ! -f "$file" ]]; then
-        log "No regex block file found, skipping"
-        debug_log "update_regex_v5: File does not exist, skipping"
-        return 0
-    fi
-    
-    debug_log "update_regex_v5: File found, size: $(stat -c%s "$file" 2>/dev/null || echo 'unknown') bytes"
-    
-    print_banner green "Starting Regex Block List (v5)"
-    
-    local count=0
-    local temp_sql="$TEMPDIR/block_regex_insert.sql"
-    debug_log "update_regex_v5: Creating SQL file: $temp_sql"
-    
-    echo "BEGIN TRANSACTION;" > "$temp_sql"
-    
-    while IFS= read -r pattern; do
-        [[ -z "$pattern" ]] && continue
-        # Type 3 = regex blacklist, enabled = 1
-        local escaped_pattern="${pattern//\'/\'\'}"
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (3, '${escaped_pattern}', 1);" >> "$temp_sql"
-        ((count++))
-        verbose_log "Queued block regex: $pattern"
-    done < "$file"
-    
-    debug_log "update_regex_v5: Queued $count block regex patterns"
-    echo "COMMIT;" >> "$temp_sql"
-    
-    debug_log "update_regex_v5: Executing SQL transaction"
-    local sql_error="$TEMPDIR/sql_error_block_v5_$$.log"
-    if ! sqlite3 "$GRAVITY_DB" < "$temp_sql" 2>"$sql_error"; then
-        log "ERROR: Failed to insert block regex"
-        if [[ -f "$sql_error" ]]; then
-            log "ERROR: SQL error: $(cat "$sql_error")"
-            rm -f "$sql_error"
-        fi
-        return 1
-    fi
-    
-    rm -f "$temp_sql" "$sql_error"
-    log_success "Added $count block regex patterns via direct SQL (fast)"
-    debug_success "update_regex_v5: Completed successfully"
-    print_banner yellow "Completed Regex Block List"
-}
-
-#======================================================================================
 # DATABASE UPDATE FUNCTIONS - PI-HOLE VERSION 6
 #======================================================================================
 
@@ -903,80 +716,29 @@ update_adlists() {
 
 update_allow() {
     log "Updating allow lists..."
-    debug_log "update_allow: Dispatching to version $version"
-    case "$version" in
-        5) 
-            debug_log "update_allow: Calling update_allow_v5"
-            update_allow_v5
-            local result=$?
-            debug_log "update_allow: update_allow_v5 returned: $result"
-            return $result
-            ;;
-        6) 
-            debug_log "update_allow: Calling update_allow_v6"
-            update_allow_v6
-            local result=$?
-            debug_log "update_allow: update_allow_v6 returned: $result"
-            return $result
-            ;;
-        *) 
-            log "ERROR: Unknown Pi-hole version: $version"
-            debug_log "update_allow: Invalid version detected"
-            return 1
-            ;;
-    esac
+    debug_log "update_allow: Calling update_allow_v6"
+    update_allow_v6
+    local result=$?
+    debug_log "update_allow: update_allow_v6 returned: $result"
+    return $result
 }
 
 update_allow_regex() {
     log "Updating allow regex..."
-    debug_log "update_allow_regex: Dispatching to version $version"
-    case "$version" in
-        5) 
-            debug_log "update_allow_regex: Calling update_allow_regex_v5"
-            update_allow_regex_v5
-            local result=$?
-            debug_log "update_allow_regex: update_allow_regex_v5 returned: $result"
-            return $result
-            ;;
-        6) 
-            debug_log "update_allow_regex: Calling update_allow_regex_v6"
-            update_allow_regex_v6
-            local result=$?
-            debug_log "update_allow_regex: update_allow_regex_v6 returned: $result"
-            return $result
-            ;;
-        *) 
-            log "ERROR: Unknown Pi-hole version: $version"
-            debug_log "update_allow_regex: Invalid version detected"
-            return 1
-            ;;
-    esac
+    debug_log "update_allow_regex: Calling update_allow_regex_v6"
+    update_allow_regex_v6
+    local result=$?
+    debug_log "update_allow_regex: update_allow_regex_v6 returned: $result"
+    return $result
 }
 
 update_block_regex() {
     log "Updating block regex..."
-    debug_log "update_block_regex: Dispatching to version $version"
-    case "$version" in
-        5) 
-            debug_log "update_block_regex: Calling update_regex_v5"
-            update_regex_v5
-            local result=$?
-            debug_log "update_block_regex: update_regex_v5 returned: $result"
-            return $result
-            ;;
-        6) 
-            debug_log "update_block_regex: Calling update_regex_v6"
-            update_regex_v6
-            local result=$?
-            debug_log "update_block_regex: update_regex_v6 returned: $result"
-            return $result
-            ;;
-        *) 
-            log "ERROR: Unknown Pi-hole version: $version"
-            debug_log "update_block_regex: Invalid version detected"
-            return 1
-            ;;
-    esac
+    debug_log "update_block_regex: Calling update_regex_v6"
+    update_regex_v6
+    local result=$?
+    debug_log "update_block_regex: update_regex_v6 returned: $result"
+    return $result
 }
 
 #======================================================================================
@@ -985,7 +747,7 @@ update_block_regex() {
 
 update_pihole_database() {
     log "=== Starting full database update ==="
-    log "Pi-hole version: $version"
+    log "Pi-hole version: $PIHOLE_VERSION"
     debug_log "update_pihole_database: Function called"
     debug_log "update_pihole_database: GRAVITY_DB=$GRAVITY_DB"
     debug_log "update_pihole_database: PIDIR=$PIDIR"
@@ -1029,7 +791,7 @@ update_pihole_database() {
 
 update_pihole_database_allow_only() {
     log "=== Starting allow list database update ==="
-    log "Pi-hole version: $version"
+    log "Pi-hole version: $PIHOLE_VERSION"
     
     update_allow
     update_allow_regex
@@ -1039,7 +801,7 @@ update_pihole_database_allow_only() {
 
 update_pihole_database_regex_only() {
     log "=== Starting regex block database update ==="
-    log "Pi-hole version: $version"
+    log "Pi-hole version: $PIHOLE_VERSION"
     
     update_block_regex
     
@@ -1511,14 +1273,13 @@ assemble_and_deploy_regex_only() {
 restart_services() {
     log "Restarting Pi-hole services..."
     
-    killall -SIGHUP pihole-FTL 2>/dev/null || true
-    pihole restartdns
+    # Reload DNS cache (Pi-hole v6 command)
+    pihole reloaddns
+    
+    # Update gravity database
     pihole -g
     
-    if [[ "$is_cloudflared" == "cloudflared" ]]; then
-        systemctl restart cloudflared
-        log "Cloudflared restarted"
-    fi
+    log "Pi-hole services restarted"
 }
 
 cleanup() {
@@ -1552,44 +1313,15 @@ purge_database() {
     }
     log "Cleared adlist table"
     
-    if [[ "$version" == "5" ]]; then
-        log "Purging Pi-hole v5 lists..."
-        
-        # Purge existing regex list
-        pihole --regex --nuke 2>/dev/null || log "WARNING: Failed to nuke regex list"
-        
-        # Purge existing wildcard deny list
-        pihole --wild --nuke 2>/dev/null || log "WARNING: Failed to nuke wildcard deny list"
-        
-        # Purge existing allow list
-        pihole -w --nuke 2>/dev/null || log "WARNING: Failed to nuke allow list"
-        
-        # Purge existing allow list regex
-        pihole --white-regex --nuke 2>/dev/null || log "WARNING: Failed to nuke allow regex"
-        
-        # Purge existing deny list
-        pihole -b --nuke 2>/dev/null || log "WARNING: Failed to nuke deny list"
-        
-        # Purge existing wildcard allow list
-        pihole --white-wild --nuke 2>/dev/null || log "WARNING: Failed to nuke wildcard allow"
-        
-        log "Pi-hole v5 database purged"
-        
-    elif [[ "$version" == "6" ]]; then
-        log "Purging Pi-hole v6 lists..."
-        
-        # Clear domainlist table
-        sqlite3 "$GRAVITY_DB" "DELETE FROM domainlist;" 2>/dev/null || {
-            log "ERROR: Failed to clear domainlist table"
-            return 1
-        }
-        
-        log "Pi-hole v6 database purged (domainlist table cleared)"
-    else
-        log "ERROR: Unknown Pi-hole version: $version"
-        return 1
-    fi
+    log "Purging Pi-hole v6 lists..."
     
+    # Clear domainlist table
+    sqlite3 "$GRAVITY_DB" "DELETE FROM domainlist;" 2>/dev/null || {
+        log "ERROR: Failed to clear domainlist table"
+        return 1
+    }
+    
+    log "Pi-hole v6 database purged (domainlist table cleared)"
     log "Database purge completed successfully"
 }
 
@@ -1921,7 +1653,7 @@ CRON EXAMPLES:
     0 4 1-7 * 0 /scripts/Finished/updates.sh purge-and-update
 
 NOTES:
-    - Automatically detects Pi-hole version (5 or 6)
+    - Requires Pi-hole v6
     - All database updates are handled internally
     - Logs to /var/log/pihole-updates.log
 

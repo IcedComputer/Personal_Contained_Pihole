@@ -161,7 +161,6 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 - `prompt_configuration()` - Interactive prompts if no config file
 - `install_pihole()` - Pi-hole installation via official installer
 - `install_unbound()` - Recursive DNS resolver (port 5335)
-- `install_cloudflared()` - DNS over HTTPS proxy (port 5053)
 - `install_wireguard()` - VPN server setup (port 51820)
 - `setup_fail2ban()` - Progressive banning configuration
 - `harden_ssh()` - SSH security hardening
@@ -175,12 +174,12 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
 4. Load config or prompt interactively
 5. Confirm settings with user
 6. Create directory structure
-7. Generate configuration files (type.conf, dns_type.conf, test.conf, ver.conf)
+7. Generate configuration files (type.conf, dns_type.conf, test.conf)
 8. System update and dependencies
 9. Security setup (unattended-upgrades, Fail2Ban, SSH)
 10. GPG key generation and auto-import from installer/public-gpg-keys/
 11. Pi-hole installation
-12. DNS provider (Unbound or Cloudflared)
+12. Unbound DNS resolver installation
 13. Update scripts installation
 14. Cron job configuration
 15. WireGuard VPN (optional) with dnsmasq addn-hosts configuration
@@ -201,8 +200,7 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
       ├── CONFIG/              # Configuration files (755 permissions)
       │   ├── type.conf                  (server type: "full"/"security"/"basic")
       │   ├── test.conf                  (test mode: "no"/"yes" - literal strings)
-      │   ├── dns_type.conf              ("cloudflared"/"unbound" - literal strings)
-      │   └── ver.conf                   (Pi-hole version: "6")
+      │   └── dns_type.conf              ("unbound" - DNS resolver)
       └── *.sh                 # All management scripts (755)
 ```
 
@@ -247,11 +245,10 @@ Downloads and deploys these 3 scripts:
 **Configuration Files Read:**
 - `/scripts/Finished/CONFIG/type.conf` - Server type ("full"/"security"/"basic")
 - `/scripts/Finished/CONFIG/test.conf` - Test mode ("no" or "yes" - literal strings)
-- `/scripts/Finished/CONFIG/dns_type.conf` - DNS provider ("cloudflared" or "unbound" - literal strings)
-- `/scripts/Finished/CONFIG/ver.conf` - Pi-hole version ("6")
+- `/scripts/Finished/CONFIG/dns_type.conf` - DNS provider ("unbound")
 
 **CRITICAL:** Config files contain literal strings, NOT numeric values:
-- dns_type.conf: "cloudflared" or "unbound" (NOT 0/1)
+- dns_type.conf: "unbound"
 - test.conf: "no" or "yes" (NOT 0/1)
 - Installer creates these files automatically with correct format
 - Directory permissions: 755 (CONFIG dir), 644 (config files)
@@ -416,7 +413,7 @@ User runs: updates.sh full-update
    - Mark all as enabled
 
 8. **Service Restart**
-   - `pihole restartdns reload-lists`
+   - `pihole reloaddns`
    - Verify FTL service running
 
 9. **Post-Update**
@@ -453,7 +450,7 @@ Only:
 
 **Required Fields:**
 - `SERVER_TYPE` - full/security/basic
-- `DNS_TYPE` - unbound/cloudflared
+- `DNS_TYPE` - unbound (recursive DNS resolver)
 - `INSTALL_VPN` - yes/no
 
 **Optional Fields:**
@@ -471,8 +468,7 @@ Only:
 **Files:**
 - `type.conf` - full, security, or basic
 - `test.conf` - true/false (test system flag)
-- `dns_type.conf` - unbound or cloudflared
-- `ver.conf` - Pi-hole version (5 or 6)
+- `dns_type.conf` - unbound
 - `github_token.conf` - GitHub PAT (600 permissions)
 - `github_token_expiry.conf` - Token expiration date (optional)
 
@@ -480,8 +476,8 @@ Only:
 ```bash
 Type=$(<"$CONFIG/type.conf")          # Determines which lists to download
 test_system=$(<"$CONFIG/test.conf")   # Affects list selection
-is_cloudflared=$(<"$CONFIG/dns_type.conf")
-version=$(<"$CONFIG/ver.conf")        # Affects database operations
+dns_type=$(<"$CONFIG/dns_type.conf")
+# PIHOLE_VERSION is hardcoded to "6" (only v6 supported)
 ```
 
 ### Profile Behavior
@@ -513,13 +509,11 @@ version=$(<"$CONFIG/ver.conf")        # Affects database operations
 
 ### Port Assignments
 
-| Service | Port | Bind | Protocol | Purpose |
-|---------|------|------|----------|---------|
+| Service | Port | Bind | Protocol | Purpose |\n|---------|------|------|----------|---------|
 | Pi-hole DNS | 53 | 0.0.0.0 | UDP/TCP | Public DNS queries |
 | Pi-hole Web | 80 | 0.0.0.0 | TCP | Admin interface |
 | SSH | 22 | 0.0.0.0 | TCP | Remote administration |
 | Unbound | 5335 | 127.0.0.1 | UDP/TCP | Recursive DNS (localhost only) |
-| Cloudflared | 5053 | 127.0.0.1 | UDP/TCP | DoH proxy (localhost only) |
 | WireGuard | 51820 | 0.0.0.0 | UDP | VPN connections |
 
 ### DNS Resolution Chain
@@ -529,10 +523,10 @@ version=$(<"$CONFIG/ver.conf")        # Affects database operations
 Client Device
     ↓ (DNS query to Pi-hole IP:53)
 Pi-hole (port 53)
-    ↓ (Forward to localhost:5335 or localhost:5053)
-Unbound (5335) OR Cloudflared (5053)
-    ↓ (Upstream resolution)
-Root DNS Servers OR Cloudflare 1.1.1.1
+    ↓ (Forward to localhost:5335)
+Unbound (5335)
+    ↓ (Recursive resolution)
+Root DNS Servers → TLD Servers → Authoritative Servers
 ```
 
 **With VPN:**
@@ -542,10 +536,10 @@ VPN Client (anywhere on internet)
 WireGuard Server (10.7.0.1)
     ↓ (Client gets 10.7.0.2-254 IP, DNS=10.7.0.1)
 Pi-hole (port 53, listening on VPN interface)
-    ↓ (Forward to localhost:5335 or localhost:5053)
-Unbound (5335) OR Cloudflared (5053)
-    ↓ (Upstream resolution)
-Root DNS Servers OR Cloudflare 1.1.1.1
+    ↓ (Forward to localhost:5335)
+Unbound (5335)
+    ↓ (Recursive resolution)
+Root DNS Servers → TLD Servers → Authoritative Servers
 ```
 
 ### Network Isolation
@@ -558,13 +552,12 @@ Root DNS Servers OR Cloudflare 1.1.1.1
 
 **Localhost-Only:**
 - Port 5335 (Unbound) - Not accessible externally
-- Port 5053 (Cloudflared) - Not accessible externally
 
 **Security Benefit:**
-- Upstream DNS resolvers isolated from network
+- Upstream DNS resolver isolated from network
 - Only Pi-hole exposed as DNS endpoint
 - Encrypted VPN provides secure admin access
-- No need for "security through obscurity" on internal ports
+- No third-party DNS providers (complete privacy)
 
 ### Critical Port Configuration Bugs (Fixed 2025-12-07)
 
@@ -573,15 +566,6 @@ Root DNS Servers OR Cloudflare 1.1.1.1
 - **Fixed:** 5335
 - **Impact:** Would break Pi-hole → Unbound communication
 - **Root Cause:** Typo or copy-paste error
-
-**Bug 2: Cloudflared Port**
-- **Was:** 555 (multiple locations in install-pihole-vpn.sh)
-- **Fixed:** 5053
-- **Impact:** Would break Pi-hole → Cloudflared communication
-- **Locations Fixed:** 
-  - Full/basic configuration (line ~866)
-  - Security configuration (line ~884)
-  - dnsmasq config (line ~920)
 
 **Why These Were Bugs, Not Features:**
 - Industry-standard ports expected by documentation
@@ -602,7 +586,7 @@ Root DNS Servers OR Cloudflare 1.1.1.1
 
 **Layer 2: Service Hardening**
 - Pi-hole: Latest version, regular updates
-- Unbound/Cloudflared: Localhost-only binding
+- Unbound: Localhost-only binding, recursive DNS resolver
 - WireGuard: Modern cryptography (ChaCha20, Curve25519)
 
 **Layer 3: SSH Security**
@@ -674,9 +658,10 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 - ✅ Brute force attacks (Fail2Ban)
 - ✅ Unauthorized SSH access (AllowUsers, keys)
 - ✅ DNS amplification attacks (rate limiting in Pi-hole)
-- ✅ Man-in-the-middle on DNS (DoH with Cloudflared, DNSSEC with Unbound)
+- ✅ Man-in-the-middle on DNS (DNSSEC with Unbound)
 - ✅ Credential theft (600 permissions, root-only)
 - ✅ Service exploitation (regular updates)
+- ✅ Third-party DNS logging (Unbound is recursive, no external provider)
 
 **Not Protected Against:**
 - ❌ Physical access to server (full disk encryption not included)
@@ -703,7 +688,6 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
     │   ├── type.conf                        (644, root:root)
     │   ├── test.conf                        (644, root:root)
     │   ├── dns_type.conf                    (644, root:root)
-    │   ├── ver.conf                         (644, root:root)
     │   └── encrypt.list                     (644, root:root)
     ├── updates.sh                           (755, root:root)
     ├── refresh.sh                           (755, root:root)
@@ -711,7 +695,6 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 
     ├── wireguard-manager.sh                 (755, root:root)
     ├── unbound_root_hints_update.sh         (755, root:root)
-    ├── cloudflared                          (644, root:root)
     └── server-public-key.gpg                (644, root:root)
 
 /etc/pihole/                                 (755, root:root)
@@ -733,7 +716,6 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 /etc/dnsmasq.d/                              (755, root:root)
 ├── 01-pihole.conf                           (644, root:root)
 ├── 02-pihole-wireguard.conf                 (644, root:root) ← VPN DNS config
-├── 50-cloudflared.conf                      (644, root:root)
 ├── 51-unbound.conf                          (644, root:root)
 └── 99-edns.conf                             (644, root:root)
 
@@ -771,7 +753,7 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 - **Was:** 700 (root-only, blocked update scripts)
 - **Now:** 755 (readable by scripts)
 - **Location:** install-pihole-vpn.sh line 530
-- **Reason:** Update scripts need to read type.conf, dns_type.conf, test.conf, ver.conf
+- **Reason:** Update scripts need to read type.conf, dns_type.conf, test.conf
 - **Security:** Config files still 644, directory traversable for script access
 
 **Added: WireGuard Hosts File**
@@ -848,7 +830,7 @@ ls -la /scripts/Finished/*.sh
 - Lower maintenance
 - Good for production servers
 
-**Recommended DNS:** Cloudflared (speed + Cloudflare's malware filtering)
+**Recommended DNS:** Unbound (privacy + local DNSSEC validation)
 
 **Example Config:** `examples/installer.conf.security`
 
@@ -870,7 +852,7 @@ ls -la /scripts/Finished/*.sh
 - Good for debugging false positives
 - Baseline protection only
 
-**Recommended DNS:** Either (both work well with basic lists)
+**Recommended DNS:** Unbound (maximum privacy, recursive resolution)
 
 **Example Config:** Not created yet (could add examples/installer.conf.basic)
 
@@ -882,13 +864,12 @@ ls -la /scripts/Finished/*.sh
 
 **Symptom:** Pi-hole can't resolve DNS, all queries timeout
 
-**Cause:** Incorrect Unbound/Cloudflared port in config
+**Cause:** Incorrect Unbound port in config
 
 **Fix:**
 - Unbound MUST be on port 5335
-- Cloudflared MUST be on port 5053
 - Check `/etc/unbound/unbound.conf.d/pi-hole.conf`
-- Check `/etc/dnsmasq.d/50-cloudflared.conf` or `99-edns.conf`
+- Check `/etc/dnsmasq.d/51-unbound.conf`
 
 **Prevention:** Use standard ports (fixed in 2025-12-07 update)
 
@@ -922,20 +903,7 @@ sudo chown root:root /scripts/Finished/CONFIG/github_token.conf
 - Running `refresh.sh` expecting all scripts to update (it only updates updates.sh)
 - Running `updates.sh` directly from GitHub (should use refresh.sh first)
 
-### 4. Database Schema Version Mismatch
-
-**Symptom:** "Table domainlist doesn't exist" or schema errors
-
-**Cause:** Pi-hole version changed (v5 → v6), database structure different
-
-**Fix:**
-- Check `/scripts/Finished/CONFIG/ver.conf`
-- Should match actual Pi-hole version
-- If mismatch, update manually: `echo "6" | sudo tee /scripts/Finished/CONFIG/ver.conf`
-- Run `pihole -up` to update Pi-hole
-- Run `updates.sh purge-and-update` to rebuild database
-
-### 5. GPG Key Import Failures
+### 4. GPG Key Import Failures
 
 **Symptom:** country.regex.gpg fails to decrypt
 
@@ -1034,11 +1002,6 @@ grep -r "github\.com/IcedComputer" --include="*.sh" --include="*.md"
 # Check Unbound port
 grep -A5 "port:" installer/install-pihole-vpn.sh
 # Should show: port: 5335 (not 566)
-
-# Check Cloudflared port
-grep "port 5" installer/install-pihole-vpn.sh
-# Should show: --port 5053 (not 555)
-# Should show: server=127.0.0.1#5053 (not 555)
 ```
 
 **3. Permission Settings**
@@ -1086,12 +1049,8 @@ dig @127.0.0.1 example.com
 systemctl status pihole-FTL
 # Should show: active (running)
 
-# Unbound (if using)
+# Unbound
 systemctl status unbound
-# Should show: active (running)
-
-# Cloudflared (if using)
-systemctl status cloudflared
 # Should show: active (running)
 
 # WireGuard (if installed)
@@ -1104,12 +1063,11 @@ sudo wg show
 **3. Port Listening**
 ```bash
 # Check all services listening on correct ports
-sudo netstat -tulpn | grep -E ":(53|5335|5053|51820|22|80)"
+sudo netstat -tulpn | grep -E ":(53|5335|51820|22|80)"
 
 # Expected:
 # :53   - pihole-FTL (0.0.0.0)
-# :5335 - unbound (127.0.0.1) [if using Unbound]
-# :5053 - cloudflared (127.0.0.1) [if using Cloudflared]
+# :5335 - unbound (127.0.0.1)
 # :51820 - (UDP) [if WireGuard installed]
 # :22   - sshd (0.0.0.0)
 # :80   - lighttpd (0.0.0.0)
@@ -1146,7 +1104,7 @@ sudo crontab -l
 # - purge-and-update (daily around 3:30 AM)
 # - allow-update (every 8 hours)
 # - pihole updateGravity (before purge)
-# Plus Cloudflared restart if using Cloudflared
+# - unbound_root_hints_update (quarterly)
 ```
 
 **7. SSH Hardening**

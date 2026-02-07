@@ -5,7 +5,7 @@
 # 
 # Description:
 #   Azure VM deployment with security focus and WireGuard VPN.
-#   Uses Cloudflared for fast DoH, security-focused lists.
+#   Uses Unbound for recursive DNS resolution (maximum privacy).
 #   Best for: Cloud-based Pi-hole, remote access DNS.
 #
 # Usage:
@@ -30,8 +30,8 @@ SERVER_TYPE="security"
 # ============================================================================
 # DNS PROVIDER CONFIGURATION
 # ============================================================================
-# Cloudflared: Fast, reliable for cloud deployments
-DNS_TYPE="cloudflared"
+# Unbound: Local recursive DNS resolver (maximum privacy)
+DNS_TYPE="unbound"
 
 # ============================================================================
 # VPN CONFIGURATION

@@ -8,7 +8,7 @@
 #
 # Description: Automated installer for Pi-hole with WireGuard VPN
 #              Supports Raspberry Pi and Ubuntu Server (Azure)
-#              Configurable upstream DNS (Cloudflared or Unbound)
+#              Uses Unbound as recursive DNS resolver for maximum privacy
 #              Includes SSH hardening and optional MFA (Google Authenticator)
 #
 # Security Features:
@@ -76,7 +76,7 @@ declare -a ERRORS=()
 # Installation state
 PLATFORM=""              # "azure", "rpi", or "other"
 SERVER_TYPE=""           # "full", "security", etc.
-DNS_TYPE=""              # "cloudflared" or "unbound"
+DNS_TYPE="unbound"       # Always use unbound (local recursive DNS)
 INSTALL_VPN=""           # "yes" or "no"
 WIREGUARD_PORT=""        # Default 51820
 PIHOLE_VERSION="6"       # Always install latest (v6)
@@ -265,25 +265,45 @@ detect_real_user() {
 detect_platform() {
     debug_log "Detecting platform..."
     
-    # Check for Azure metadata service
-    if curl -s -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" >/dev/null 2>&1; then
-        PLATFORM="azure"
-        log_success "Detected platform: Azure Ubuntu Server"
-        return 0
-    fi
-    
-    # Check for Raspberry Pi
+    # Check for Raspberry Pi FIRST (faster, more reliable than network-based Azure check)
     if [[ -f /proc/device-tree/model ]] && grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
         PLATFORM="rpi"
         log_success "Detected platform: Raspberry Pi"
         return 0
     fi
     
-    # Check architecture
+    # Check architecture for ARM-based systems (Raspberry Pi variants)
     local arch=$(uname -m)
     if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "armv7l" ]]; then
+        # Additional check for Debian-based RPi OS
+        if grep -qi "raspbian\|raspberry" /etc/os-release 2>/dev/null; then
+            PLATFORM="rpi"
+            log_success "Detected platform: Raspberry Pi (from os-release)"
+            return 0
+        fi
+        # Check for common RPi identifiers
+        if [[ -f /sys/firmware/devicetree/base/model ]]; then
+            local model=$(cat /sys/firmware/devicetree/base/model 2>/dev/null | tr -d '\0' || true)
+            if [[ "$model" == *"Raspberry"* ]]; then
+                PLATFORM="rpi"
+                log_success "Detected platform: Raspberry Pi ($model)"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Check for Azure metadata service (with strict timeout to prevent hanging)
+    # Use --connect-timeout and --max-time to prevent indefinite hangs
+    if curl -s --connect-timeout 2 --max-time 3 -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" >/dev/null 2>&1; then
+        PLATFORM="azure"
+        log_success "Detected platform: Azure Ubuntu Server"
+        return 0
+    fi
+    
+    # For ARM architecture without RPi identifiers, assume RPi-like environment
+    if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "armv7l" ]]; then
         PLATFORM="rpi"
-        log_warning "ARM architecture detected, assuming Raspberry Pi"
+        log_warning "ARM architecture detected, assuming Raspberry Pi-like environment"
         return 0
     fi
     
@@ -412,34 +432,35 @@ prompt_configuration() {
     esac
     log_success "Server type: ${SERVER_TYPE}"
     
-    # DNS Provider
-    echo ""
-    echo "Select upstream DNS provider:"
-    echo "1) Unbound (local recursive DNS, most private)"
-    echo "2) Cloudflared (DNS over HTTPS via Cloudflare)"
-    read -p "Enter choice [1-2]: " dns_choice
+    # DNS Provider - Always Unbound (local recursive DNS, most private)
+    DNS_TYPE="unbound"
+    log_success "DNS provider: unbound (local recursive resolver)"
     
-    case $dns_choice in
-        1) DNS_TYPE="unbound" ;;
-        2) DNS_TYPE="cloudflared" ;;
-        *) 
-            log_error "Invalid choice, defaulting to 'unbound'"
-            DNS_TYPE="unbound"
-            ;;
-    esac
-    log_success "DNS provider: ${DNS_TYPE}"
-    
-    # VPN Installation
+    # VPN Installation - Default depends on platform
     echo ""
-    read -p "Install WireGuard VPN? [Y/n]: " vpn_choice
-    case ${vpn_choice,,} in
-        y|yes|"") INSTALL_VPN="yes" ;;
-        n|no) INSTALL_VPN="no" ;;
-        *)
-            log_error "Invalid choice, defaulting to 'yes'"
-            INSTALL_VPN="yes"
-            ;;
-    esac
+    if [[ "${PLATFORM}" == "rpi" ]]; then
+        # Raspberry Pi: Default to NO VPN (resource-constrained, typically home use)
+        read -p "Install WireGuard VPN? [y/N]: " vpn_choice
+        case ${vpn_choice,,} in
+            y|yes) INSTALL_VPN="yes" ;;
+            n|no|"") INSTALL_VPN="no" ;;
+            *)
+                log_info "Invalid choice, defaulting to 'no' for Raspberry Pi"
+                INSTALL_VPN="no"
+                ;;
+        esac
+    else
+        # Azure/Cloud: Default to YES VPN (typical use case for remote access)
+        read -p "Install WireGuard VPN? [Y/n]: " vpn_choice
+        case ${vpn_choice,,} in
+            y|yes|"") INSTALL_VPN="yes" ;;
+            n|no) INSTALL_VPN="no" ;;
+            *)
+                log_error "Invalid choice, defaulting to 'yes'"
+                INSTALL_VPN="yes"
+                ;;
+        esac
+    fi
     log_success "VPN installation: ${INSTALL_VPN}"
     
     # WireGuard Port
@@ -530,7 +551,7 @@ create_config_files() {
     echo "${SERVER_TYPE}" > "${PATH_CONFIG}/type.conf"
     chmod 644 "${PATH_CONFIG}/type.conf"
     
-    # Create dns_type.conf (dns provider: literal string 'cloudflared' or 'unbound')
+    # Create dns_type.conf (dns provider: 'unbound')
     echo "${DNS_TYPE}" > "${PATH_CONFIG}/dns_type.conf"
     chmod 644 "${PATH_CONFIG}/dns_type.conf"
     
@@ -538,15 +559,10 @@ create_config_files() {
     echo "no" > "${PATH_CONFIG}/test.conf"
     chmod 644 "${PATH_CONFIG}/test.conf"
     
-    # Create ver.conf (Pi-hole version: 5 or 6)
-    echo "${PIHOLE_VERSION}" > "${PATH_CONFIG}/ver.conf"
-    chmod 644 "${PATH_CONFIG}/ver.conf"
-    
     log_success "Configuration files created"
     debug_log "type.conf: ${SERVER_TYPE}"
     debug_log "dns_type.conf: ${DNS_TYPE}"
     debug_log "test.conf: no (production)"
-    debug_log "ver.conf: ${PIHOLE_VERSION}"
 }
 
 system_update() {
@@ -955,135 +971,6 @@ EOFSCRIPT
     log_success "Scheduled Unbound root hints update (quarterly: $(printf 'day %d, %02d:%02d' ${random_day} ${random_hour} ${random_minute}))"
 }
 
-install_cloudflared() {
-    log_info "Installing Cloudflared DNS over HTTPS..."
-    
-    # Add Cloudflare repository
-    mkdir -p --mode=0755 /usr/share/keyrings
-    
-    if curl --tlsv1.3 -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null; then
-        log_success "Added Cloudflare GPG key"
-    else
-        log_error "Failed to add Cloudflare GPG key"
-        return 1
-    fi
-    
-    # Determine distribution
-    local distro="jammy"  # Default Ubuntu
-    if [[ "${PLATFORM}" == "rpi" ]]; then
-        distro="bookworm"  # Raspberry Pi OS
-    fi
-    
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${distro} main" | \
-        tee /etc/apt/sources.list.d/cloudflared.list
-    
-    apt-get update || log_warning "apt update after adding cloudflared repo had issues"
-    
-    if apt-get install -y cloudflared; then
-        log_success "Cloudflared installed"
-        cloudflared -v | tee -a "${LOG_FILE}"
-    else
-        log_error "Failed to install cloudflared"
-        return 1
-    fi
-    
-    # Generate Cloudflared configuration based on SERVER_TYPE
-    log_info "Configuring Cloudflared..."
-    
-    cat > "${PATH_FINISHED}/cloudflared" << EOF
-# Cloudflared DNS over HTTPS Configuration
-## Last Updated: $(date --iso-8601)
-
-## Normal
-EOF
-    
-    if [[ "${SERVER_TYPE}" == "full" ]] || [[ "${SERVER_TYPE}" == "basic" ]]; then
-        # Full/Basic: Use normal Cloudflare DNS (uncommented)
-        cat >> "${PATH_FINISHED}/cloudflared" << 'EOF'
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/.well-known/dns-query --upstream https://1.0.0.1/.well-known/dns-query
-CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/dns-query --upstream https://1.0.0.1/dns-query --upstream https://cloudflare-dns.com/dns-query
-
-
-## Anti-Malware
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.2/.well-known/dns-query --upstream https://1.0.0.2/.well-known/dns-query
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://security.cloudflare-dns.com/dns-query --upstream https://security.cloudflare-dns.com/dns-query
-
-## Anti-Malware & Anti-Adult
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.3/.well-known/dns-query --upstream https://1.0.0.3/.well-known/dns-query
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://family.cloudflare-dns.com/dns-query --upstream https://family.cloudflare-dns.com/dns-query
-EOF
-        log_success "Generated Cloudflared config (Normal DNS for ${SERVER_TYPE})"
-    else
-        # Security: Use anti-malware DNS (uncommented)
-        cat >> "${PATH_FINISHED}/cloudflared" << 'EOF'
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/.well-known/dns-query --upstream https://1.0.0.1/.well-known/dns-query
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.1/dns-query --upstream https://1.0.0.1/dns-query --upstream https://cloudflare-dns.com/dns-query
-
-
-## Anti-Malware
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.2/.well-known/dns-query --upstream https://1.0.0.2/.well-known/dns-query
-CLOUDFLARED_OPTS=--port 5053 --upstream https://security.cloudflare-dns.com/dns-query --upstream https://security.cloudflare-dns.com/dns-query
-
-## Anti-Malware & Anti-Adult
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://1.1.1.3/.well-known/dns-query --upstream https://1.0.0.3/.well-known/dns-query
-#CLOUDFLARED_OPTS=--port 5053 --upstream https://family.cloudflare-dns.com/dns-query --upstream https://family.cloudflare-dns.com/dns-query
-EOF
-        log_success "Generated Cloudflared config (Security DNS for ${SERVER_TYPE})"
-    fi
-    
-    # Generate Cloudflared systemd service locally
-    cat > /lib/systemd/system/cloudflared.service << EOF
-[Unit]
-Description=cloudflared DNS over HTTPS proxy
-After=syslog.target network-online.target
-
-[Service]
-Type=simple
-User=root
-EnvironmentFile=${PATH_FINISHED}/cloudflared
-ExecStart=/usr/local/bin/cloudflared proxy-dns \$CLOUDFLARED_OPTS
-Restart=on-failure
-RestartSec=10
-KillMode=process
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    log_success "Generated Cloudflared systemd service"
-    
-    # Enable and start Cloudflared service
-    systemctl enable cloudflared
-    if systemctl start cloudflared; then
-        log_success "Cloudflared service started"
-    else
-        log_error "Failed to start Cloudflared service"
-        return 1
-    fi
-    
-    # Generate dnsmasq Cloudflared configuration (Pi-hole must be installed first)
-    if [[ ! -d /etc/dnsmasq.d ]]; then
-        log_error "ERROR: /etc/dnsmasq.d directory not found - Pi-hole may not be installed correctly"
-        return 1
-    fi
-    
-    echo "server=127.0.0.1#5053" > /etc/dnsmasq.d/50-cloudflared.conf
-    log_success "Generated dnsmasq Cloudflared configuration"
-    
-    # Restart Pi-hole FTL to apply cloudflared configuration
-    if systemctl is-active --quiet pihole-FTL; then
-        systemctl restart pihole-FTL
-        log_success "Restarted Pi-hole FTL to apply Cloudflared configuration"
-    else
-        log_warning "Pi-hole FTL not running - configuration will apply on next start"
-    fi
-    
-    # Fix Pi-hole config for Cloudflared
-    sed -i "s/PIHOLE_DNS/#PIHOLE_DNS/g" /etc/pihole/setupVars.conf 2>/dev/null || true
-    sed -i "s/server=8.8/#server=8.8/g" /etc/dnsmasq.d/01-pihole.conf 2>/dev/null || true
-    
-    log_success "Cloudflared installation completed (restart scheduled in cron setup)"
-}
-
 # ============================================================================
 # UPDATE SCRIPT INSTALLATION
 # ============================================================================
@@ -1187,16 +1074,6 @@ setup_cron_jobs() {
     
     log_info "daily reboot scheduled at: $(printf "%02d:%02d" ${reboot_hour} ${reboot_minute})"
     
-    # Calculate Cloudflared restart time (13 hours after reboot) if using Cloudflared
-    local cloudflared_total_minutes=$((reboot_total_minutes + 780))  # +13 hours
-    cloudflared_total_minutes=$((cloudflared_total_minutes % 1440))  # Wrap around 24 hours
-    local cloudflared_hour=$((cloudflared_total_minutes / 60))
-    local cloudflared_minute=$((cloudflared_total_minutes % 60))
-    
-    if [[ "${DNS_TYPE}" == "cloudflared" ]]; then
-        log_info "cloudflared restart scheduled at: $(printf "%02d:%02d" ${cloudflared_hour} ${cloudflared_minute})"
-    fi
-    
     # Add cron jobs
     (
         crontab -l 2>/dev/null
@@ -1205,11 +1082,6 @@ setup_cron_jobs() {
         echo "${allow_minute1} ${allow_hour1},${allow_hour2} * * * bash ${PATH_FINISHED}/updates.sh allow-update >> /var/log/pihole-allow-update.log 2>&1"
         echo "${refresh_minute} ${refresh_hour} * * * bash ${PATH_FINISHED}/updates.sh refresh >> /var/log/pihole-refresh.log 2>&1"
         echo "${reboot_minute} ${reboot_hour} * * * /sbin/reboot >> /var/log/pihole-reboot.log 2>&1"
-        
-        # Add Cloudflared restart if using Cloudflared
-        if [[ "${DNS_TYPE}" == "cloudflared" ]]; then
-            echo "${cloudflared_minute} ${cloudflared_hour} * * * /bin/systemctl restart cloudflared >> /var/log/cloudflared-restart.log 2>&1"
-        fi
     ) | crontab -
     
     log_success "Cron jobs configured successfully"
@@ -1225,14 +1097,7 @@ setup_cron_jobs() {
     printf "  Allow List Update:  %02d:%02d, %02d:%02d daily\n" \
         ${allow_hour1} ${allow_minute1} ${allow_hour2} ${allow_minute2}
     printf "  System Reboot:      %02d:%02d daily\n" ${reboot_hour} ${reboot_minute}
-    
-    if [[ "${DNS_TYPE}" == "unbound" ]]; then
-        printf "  Unbound Root Hints: Quarterly (every 3 months)\n"
-    fi
-    
-    if [[ "${DNS_TYPE}" == "cloudflared" ]]; then
-        printf "  Cloudflared Restart: %02d:%02d daily\n" ${cloudflared_hour} ${cloudflared_minute}
-    fi
+    printf "  Unbound Root Hints: Quarterly (every 3 months)\n"
     
     echo ""
     sleep 3
@@ -1450,7 +1315,7 @@ setup_fail2ban() {
 # Ban settings
 bantime  = 1500        # 25 minutes (1500 seconds)
 maxretry = 3           # 3 attempts before initial ban
-findtime = 600         # 10 minute window for attempts
+findtime = 86400       # 24 hour window for attempts
 
 # Email alerts (configure if desired)
 destemail = root@localhost
@@ -1472,23 +1337,23 @@ filter = pihole
 logpath = /var/log/pihole.log
 maxretry = 3
 
-# Recidivist jail - 7 day ban after 3 short bans in 24 hours
+# Recidivist jail - 7 day ban after 3 short bans in 90 days
 [recidive]
 enabled = true
 filter = recidive
 logpath = /var/log/fail2ban.log
 bantime = 604800       # 7 days
-findtime = 86400       # 24 hour window
+findtime = 7776000     # 90 day window
 maxretry = 3           # After 3 short bans
 action = %(action_mwl)s
 
-# Permanent ban jail - forever after 2 recidive bans
+# Permanent ban jail - forever after 2 recidive bans in 1 year
 [recidive-permanent]
 enabled = true
 filter = recidive-permanent
 logpath = /var/log/fail2ban.log
 bantime = -1           # Permanent ban (-1 = forever)
-findtime = 604800      # 7 day window
+findtime = 31536000    # 1 year window
 maxretry = 2           # After 2 recidive bans
 action = %(action_mwl)s
 EOF
@@ -1825,20 +1690,9 @@ main() {
         install_pihole && mark_step_complete "pihole"
     fi
     
-    # DNS Provider
+    # DNS Provider - Always Unbound
     if ! skip_if_complete "dns_provider" "DNS provider setup"; then
-        case "${DNS_TYPE}" in
-            unbound)
-                install_unbound && mark_step_complete "dns_provider"
-                ;;
-            cloudflared)
-                install_cloudflared && mark_step_complete "dns_provider"
-                ;;
-            *)
-                log_error "Invalid DNS type: ${DNS_TYPE}"
-                exit 1
-                ;;
-        esac
+        install_unbound && mark_step_complete "dns_provider"
     fi
     
     # Update scripts

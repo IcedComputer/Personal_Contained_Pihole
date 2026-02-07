@@ -75,20 +75,12 @@
 # sudo bash /scripts/Finished/wireguard-manager.sh
 
 # ============================================================================
-# CLOUDFLARED CRON JOBS (if using Cloudflared)
+# UNBOUND CRON JOBS
 # ============================================================================
 
-# --- Cloudflared Restart (Every 5 minutes) ---
-# Automatically configured by installer
-# */5 * * * * /bin/systemctl restart cloudflared >/dev/null 2>&1
-
-# ============================================================================
-# UNBOUND CRON JOBS (if using Unbound)
-# ============================================================================
-
-# --- Root Hints Update (Monthly, 1st day at 5 AM) ---
-# Automatically configured by installer
-# 0 5 1 * * /usr/bin/bash /scripts/Finished/unbound_root_hints_update.sh >/dev/null 2>&1
+# --- Root Hints Update (Quarterly - every 3 months) ---
+# Automatically configured by installer with randomized day/time
+# 0 5 1 */3 * /usr/bin/bash /scripts/Finished/unbound_root_hints_update.sh >/dev/null 2>&1
 
 # ============================================================================
 # CUSTOM CRON JOBS

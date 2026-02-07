@@ -71,16 +71,9 @@ SERVER_TYPE="full"
 #                   Port: 5335 (localhost only)
 #                   Resolves DNS queries directly from root servers
 #                   Advantages: Maximum privacy, no third-party logging
-#                   Best for: Privacy-focused deployments
+#                   No external DNS provider - complete control
 #
-#   "cloudflared" - DNS over HTTPS via Cloudflare
-#                   Port: 5053 (localhost only)
-#                   Routes DNS through Cloudflare's 1.1.1.1 service
-#                   Advantages: Fast, encrypted, reliable
-#                   Best for: Speed and reliability
-#
-# Both options protect your DNS queries and work with Pi-hole (port 53).
-# DNS chain: Client → Pi-hole:53 → Unbound:5335/Cloudflared:5053 → Internet
+# DNS chain: Client → Pi-hole:53 → Unbound:5335 → Root DNS Servers
 # REQUIRED: Must be set for unattended installation.
 DNS_TYPE="unbound"
 
@@ -275,10 +268,10 @@ PIHOLE_VERSION="6"
 #INSTALL_VPN="yes"
 #WIREGUARD_PORT="51820"
 
-# Example 2: Azure Ubuntu with Cloudflared, Security Only, No VPN
+# Example 2: Azure Ubuntu, Security Only, No VPN
 #PLATFORM="azure"
 #SERVER_TYPE="security"
-#DNS_TYPE="cloudflared"
+#DNS_TYPE="unbound"
 #INSTALL_VPN="no"
 
 # Example 3: Any Linux with Unbound, Basic Protection, VPN on Custom Port
