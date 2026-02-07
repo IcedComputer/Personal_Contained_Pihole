@@ -3,7 +3,7 @@
 # Pi-hole Update Manager
 # File: updates.sh
 # Created: 2020-07-25
-# Last Modified: 2026-01-29
+# Last Modified: 2025-12-07
 # Version: 2.0.0
 #
 # Description: Automated update manager for Pi-hole configurations
