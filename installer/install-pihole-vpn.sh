@@ -964,43 +964,142 @@ EOF
     
     if [[ -f "${PIHOLE_TOML}" ]]; then
         # Enable loading of /etc/dnsmasq.d/*.conf files (disabled by default in v6)
-        if grep -q "etc_dnsmasq_d" "${PIHOLE_TOML}"; then
-            sed -i 's/etc_dnsmasq_d\s*=\s*false/etc_dnsmasq_d = true/' "${PIHOLE_TOML}"
+        # Use pihole-FTL CLI for reliable config changes
+        log_info "Setting misc.etc_dnsmasq_d = true..."
+        if pihole-FTL --config misc.etc_dnsmasq_d true 2>/dev/null; then
+            log_success "Enabled /etc/dnsmasq.d/ config loading via CLI"
         else
-            # Add the setting if not present
-            sed -i '/^\[misc\]/a\  etc_dnsmasq_d = true' "${PIHOLE_TOML}"
+            # Fallback to direct file edit if CLI fails
+            log_warning "CLI failed, attempting direct file edit..."
+            sed -i 's/etc_dnsmasq_d *= *false/etc_dnsmasq_d = true/g' "${PIHOLE_TOML}"
+            # If setting doesn't exist, add it
+            if ! grep -q "etc_dnsmasq_d.*=.*true" "${PIHOLE_TOML}"; then
+                # Append to [misc] section or end of file
+                echo -e '\n[misc]\n  etc_dnsmasq_d = true' >> "${PIHOLE_TOML}"
+            fi
+            log_success "Enabled /etc/dnsmasq.d/ config loading in pihole.toml"
         fi
-        log_success "Enabled /etc/dnsmasq.d/ config loading in pihole.toml"
         
         # Set upstream DNS to only use Unbound (removes any default like 8.8.8.8, 8.8.4.4)
-        if grep -q "upstreams" "${PIHOLE_TOML}"; then
-            # Replace the upstreams line to use only Unbound
-            sed -i 's/upstreams\s*=\s*\[.*\]/upstreams = [ "127.0.0.1#5335" ]/' "${PIHOLE_TOML}"
+        log_info "Setting dns.upstreams to 127.0.0.1#5335..."
+        if pihole-FTL --config dns.upstreams '["127.0.0.1#5335"]' 2>/dev/null; then
+            log_success "Configured Pi-hole to use Unbound (127.0.0.1#5335) as only upstream DNS via CLI"
         else
-            # Add the setting if not present
-            sed -i '/^\[dns\]/a\  upstreams = [ "127.0.0.1#5335" ]' "${PIHOLE_TOML}"
+            # Fallback to direct file edit if CLI fails
+            log_warning "CLI failed, attempting direct file edit..."
+            # Use Python for reliable TOML editing if available, otherwise sed
+            if command -v python3 &>/dev/null; then
+                python3 << 'PYEOF'
+import re
+toml_file = "/etc/pihole/pihole.toml"
+with open(toml_file, 'r') as f:
+    content = f.read()
+# Replace upstreams line
+content = re.sub(r'upstreams\s*=\s*\[.*?\]', 'upstreams = [ "127.0.0.1#5335" ]', content, flags=re.DOTALL)
+with open(toml_file, 'w') as f:
+    f.write(content)
+PYEOF
+                log_success "Configured Pi-hole to use Unbound via Python"
+            else
+                # sed fallback - match the upstreams line
+                sed -i '/^[[:space:]]*upstreams[[:space:]]*=/c\  upstreams = [ "127.0.0.1#5335" ]' "${PIHOLE_TOML}"
+                log_success "Configured Pi-hole to use Unbound via sed"
+            fi
         fi
-        log_success "Configured Pi-hole to use Unbound (127.0.0.1#5335) as only upstream DNS"
+        
+        # Set listeningMode to SINGLE (required for VPN clients to use Pi-hole)
+        # LOCAL only allows queries from local subnet; SINGLE allows all origins on specified interface
+        log_info "Setting dns.listeningMode to SINGLE for VPN support..."
+        if pihole-FTL --config dns.listeningMode SINGLE 2>/dev/null; then
+            log_success "Configured listeningMode = SINGLE via CLI"
+        else
+            # Fallback to direct file edit
+            log_warning "CLI failed, attempting direct file edit..."
+            sed -i 's/listeningMode *= *"LOCAL"/listeningMode = "SINGLE"/g' "${PIHOLE_TOML}"
+            sed -i 's/listeningMode *= *"local"/listeningMode = "SINGLE"/g' "${PIHOLE_TOML}"
+            log_success "Configured listeningMode = SINGLE via sed"
+        fi
     else
-        log_warning "pihole.toml not found - Pi-hole may need manual DNS configuration"
+        log_error "pihole.toml not found at ${PIHOLE_TOML} - Pi-hole v6 may not be installed correctly"
+        return 1
     fi
     
-    # Also create dnsmasq.d config for additional settings (now that etc_dnsmasq_d is enabled)
-    if [[ -d /etc/dnsmasq.d ]]; then
-        cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
-# Unbound integration - EDNS packet size
-# Note: Pi-hole v6 handles upstream via pihole.toml [dns].upstreams
+    # Create dnsmasq.d directory if it doesn't exist
+    mkdir -p /etc/dnsmasq.d
+    
+    # Create dnsmasq.d config for EDNS settings (now that etc_dnsmasq_d is enabled)
+    cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
+# Unbound integration for Pi-hole
+# EDNS packet size to match Unbound's edns-buffer-size
 edns-packet-max=1232
 EOF
-        log_success "Created /etc/dnsmasq.d/51-unbound.conf for EDNS settings"
+    chmod 644 /etc/dnsmasq.d/51-unbound.conf
+    log_success "Created /etc/dnsmasq.d/51-unbound.conf"
+    
+    # Verify the configuration was applied
+    log_info "Verifying Pi-hole configuration..."
+    if grep -q 'etc_dnsmasq_d.*=.*true' "${PIHOLE_TOML}"; then
+        log_success "Verified: etc_dnsmasq_d = true"
+    else
+        log_error "FAILED: etc_dnsmasq_d was not set to true"
+    fi
+    if grep -q '127.0.0.1#5335' "${PIHOLE_TOML}"; then
+        log_success "Verified: upstreams contains 127.0.0.1#5335"
+    else
+        log_error "FAILED: upstreams was not set to 127.0.0.1#5335"
+    fi
+    if grep -qi 'listeningMode.*=.*"SINGLE"' "${PIHOLE_TOML}"; then
+        log_success "Verified: listeningMode = SINGLE"
+    else
+        log_error "FAILED: listeningMode was not set to SINGLE"
+    fi
+    if [[ -f /etc/dnsmasq.d/51-unbound.conf ]]; then
+        log_success "Verified: /etc/dnsmasq.d/51-unbound.conf exists"
+    else
+        log_error "FAILED: /etc/dnsmasq.d/51-unbound.conf was not created"
     fi
     
-    # Restart Pi-hole FTL to apply configuration
-    if systemctl is-active --quiet pihole-FTL; then
-        systemctl restart pihole-FTL
-        log_success "Restarted Pi-hole FTL to apply Unbound configuration"
+    # Final service restarts to ensure all configuration is applied
+    log_info "Restarting services to apply all configuration..."
+    
+    # 1. Stop Pi-hole FTL first (it depends on Unbound)
+    systemctl stop pihole-FTL 2>/dev/null || true
+    
+    # 2. Restart Unbound to ensure it's ready
+    log_info "Restarting Unbound..."
+    if systemctl restart unbound; then
+        log_success "Unbound restarted successfully"
+        # Wait for Unbound to be fully ready
+        sleep 2
     else
-        log_warning "Pi-hole FTL not running - configuration will apply on next start"
+        log_error "Failed to restart Unbound"
+        return 1
+    fi
+    
+    # 3. Verify Unbound is responding
+    log_info "Testing Unbound DNS resolution..."
+    if dig @127.0.0.1 -p 5335 pi-hole.net +short +time=5 &>/dev/null; then
+        log_success "Unbound is responding to queries"
+    else
+        log_warning "Unbound test query failed - may need more time to initialize"
+    fi
+    
+    # 4. Start Pi-hole FTL with all new configuration
+    log_info "Starting Pi-hole FTL with new configuration..."
+    if systemctl start pihole-FTL; then
+        log_success "Pi-hole FTL started with Unbound configuration"
+    else
+        log_error "Failed to start Pi-hole FTL"
+        return 1
+    fi
+    
+    # 5. Final verification - test Pi-hole DNS
+    sleep 2
+    log_info "Testing Pi-hole DNS resolution via Unbound..."
+    if dig @127.0.0.1 pi-hole.net +short +time=5 &>/dev/null; then
+        log_success "Pi-hole DNS is working with Unbound upstream"
+    else
+        log_warning "Pi-hole DNS test failed - check configuration"
     fi
     
     # Create root hints update script
@@ -1584,110 +1683,24 @@ setup_mfa() {
     
     log_info "Setting up Multi-Factor Authentication (Google Authenticator)..."
     
-    # Install google-authenticator
+    # Install google-authenticator package
     if ! apt-get install -y libpam-google-authenticator; then
-        log_error "Failed to install google-authenticator"
+        log_error "Failed to install libpam-google-authenticator"
         return 1
     fi
-    log_success "Installed google-authenticator"
+    log_success "Installed libpam-google-authenticator"
     
-    # Configure PAM for SSH
-    # Reference: https://ubuntu.com/tutorials/configure-ssh-2fa
-    local pam_sshd="/etc/pam.d/sshd"
-    local backup_pam="${pam_sshd}.backup.$(date +%Y%m%d-%H%M%S)"
-    cp "${pam_sshd}" "${backup_pam}"
-    log_info "Backed up PAM config to ${backup_pam}"
-    
-    if ! grep -q "pam_google_authenticator.so" "${pam_sshd}"; then
-        # Insert Google Authenticator at the BEGINNING of the file (before @include common-auth)
-        # Using 'nullok' allows users without TOTP configured to still log in (remove after all users configured)
-        # pam_permit.so is required because nullok returns IGNORE, need at least one SUCCESS
-        local temp_pam="${pam_sshd}.tmp.$$"
-        {
-            echo "# Google Authenticator 2FA (added by installer)"
-            echo "# nullok allows login if user hasn't configured TOTP yet - remove once all users configured"
-            echo "auth required pam_google_authenticator.so nullok"
-            echo "auth required pam_permit.so"
-            echo ""
-            cat "${pam_sshd}"
-        } > "${temp_pam}"
-        mv "${temp_pam}" "${pam_sshd}"
-        chmod 644 "${pam_sshd}"
-        log_success "Added Google Authenticator to PAM configuration (at beginning)"
-    else
-        log_info "Google Authenticator already configured in PAM"
-    fi
-    
-    # Configure SSHD for 2FA
-    local sshd_config="/etc/ssh/sshd_config"
-    local backup_sshd="${sshd_config}.backup.mfa.$(date +%Y%m%d-%H%M%S)"
-    cp "${sshd_config}" "${backup_sshd}"
-    log_info "Backed up SSH config to ${backup_sshd}"
-    
-    # Enable keyboard-interactive authentication (required for PAM/TOTP)
-    if grep -q "^KbdInteractiveAuthentication no" "${sshd_config}"; then
-        sed -i 's/^KbdInteractiveAuthentication no/KbdInteractiveAuthentication yes/' "${sshd_config}"
-        log_info "Changed KbdInteractiveAuthentication to yes"
-    elif grep -q "^#KbdInteractiveAuthentication" "${sshd_config}"; then
-        sed -i 's/^#KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' "${sshd_config}"
-        log_info "Enabled KbdInteractiveAuthentication"
-    elif ! grep -q "^KbdInteractiveAuthentication yes" "${sshd_config}"; then
-        echo "" >> "${sshd_config}"
-        echo "# Enable keyboard-interactive for 2FA" >> "${sshd_config}"
-        echo "KbdInteractiveAuthentication yes" >> "${sshd_config}"
-        log_info "Added KbdInteractiveAuthentication yes"
-    fi
-    
-    # Handle legacy ChallengeResponseAuthentication (older systems)
-    if grep -q "^ChallengeResponseAuthentication no" "${sshd_config}"; then
-        sed -i 's/^ChallengeResponseAuthentication no/ChallengeResponseAuthentication yes/' "${sshd_config}"
-        log_info "Changed ChallengeResponseAuthentication to yes"
-    fi
-    
-    # CRITICAL: Set AuthenticationMethods to require BOTH pubkey AND TOTP
-    # Comma means AND (both required), space would mean OR
-    if ! grep -q "^AuthenticationMethods" "${sshd_config}"; then
-        echo "" >> "${sshd_config}"
-        echo "# Require both SSH key AND TOTP verification (2FA)" >> "${sshd_config}"
-        echo "AuthenticationMethods publickey,keyboard-interactive:pam" >> "${sshd_config}"
-        log_success "Added AuthenticationMethods: publickey + TOTP required"
-    else
-        log_info "AuthenticationMethods already configured"
-    fi
-    
-    # Ensure UsePAM is enabled
-    if grep -q "^UsePAM no" "${sshd_config}"; then
-        sed -i 's/^UsePAM no/UsePAM yes/' "${sshd_config}"
-        log_info "Enabled UsePAM"
-    fi
-    
-    # Test SSH config before applying
-    if ! sshd -t 2>/dev/null; then
-        log_error "SSH config test failed after MFA changes!"
-        log_warning "Restoring backup..."
-        cp "${backup_sshd}" "${sshd_config}"
-        cp "${backup_pam}" "${pam_sshd}"
-        return 1
-    fi
-    log_success "SSH configuration validated"
-    
-    # Restart SSH
-    if systemctl restart sshd || systemctl restart ssh; then
-        log_success "SSH service restarted with MFA support"
-    else
-        log_error "Failed to restart SSH"
-        return 1
-    fi
-    
-    # User instructions
+    # User instructions - manual setup required
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║          GOOGLE AUTHENTICATOR SETUP REQUIRED                 ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "  MFA is now configured! You MUST complete setup before logging out."
+    echo "  The libpam-google-authenticator package has been installed."
     echo ""
-    echo "  Step 1: Run this command as ${REAL_USER}:"
+    echo "  To enable MFA, you must manually complete these steps:"
+    echo ""
+    echo "  Step 1: Run this command as your user (not root):"
     echo ""
     echo "    google-authenticator"
     echo ""
@@ -1699,16 +1712,26 @@ setup_mfa() {
     echo "    - Enable rate-limiting: YES"
     echo ""
     echo "  Step 3: Scan the QR code with your authenticator app"
-    echo "          (Google Authenticator, Authy, etc.)"
+    echo "          (Google Authenticator, Authy, Microsoft Authenticator, etc.)"
     echo ""
     echo "  Step 4: SAVE the emergency scratch codes somewhere safe!"
     echo ""
-    echo -e "${COLOR_YELLOW}  ⚠ WARNING: Do NOT log out until you complete these steps!${COLOR_RESET}"
-    echo -e "${COLOR_YELLOW}  ⚠ The 'nullok' option allows login without TOTP during setup.${COLOR_RESET}"
-    echo -e "${COLOR_YELLOW}  ⚠ Remove 'nullok' from /etc/pam.d/sshd once configured.${COLOR_RESET}"
+    echo "  Step 5: Configure PAM and SSH for 2FA:"
+    echo "    Edit /etc/pam.d/sshd and add at the end:"
+    echo "      auth required pam_google_authenticator.so"
     echo ""
-    log_warning "MFA configured with 'nullok' - complete google-authenticator setup before logging out!"
-    sleep 5
+    echo "    Edit /etc/ssh/sshd_config and ensure:"
+    echo "      ChallengeResponseAuthentication yes"
+    echo "      # Or on newer systems:"
+    echo "      KbdInteractiveAuthentication yes"
+    echo ""
+    echo "    Then restart SSH:"
+    echo "      sudo systemctl restart sshd"
+    echo ""
+    echo -e "${COLOR_YELLOW}  See: https://ubuntu.com/tutorials/configure-ssh-2fa${COLOR_RESET}"
+    echo ""
+    
+    log_success "libpam-google-authenticator installed - manual configuration required"
 }
 
 cleanup_installation() {
