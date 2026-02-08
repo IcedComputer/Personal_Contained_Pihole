@@ -883,45 +883,63 @@ install_unbound() {
     # Generate Unbound configuration
     log_info "Configuring Unbound..."
     
-    # Create Pi-hole optimized Unbound config
+    # Create Pi-hole optimized Unbound config (per https://docs.pi-hole.net/guides/dns/unbound/)
     cat > /etc/unbound/unbound.conf.d/pi-hole.conf << 'EOF'
 server:
-    # Network settings
-    interface: 0.0.0.0
+    # If no logfile is specified, syslog is used
+    # logfile: "/var/log/unbound/unbound.log"
+    verbosity: 0
+
+    # Network settings - listen only on localhost for Pi-hole
+    interface: 127.0.0.1
     port: 5335
     do-ip4: yes
     do-udp: yes
     do-tcp: yes
+
+    # May be set to yes if you have IPv6 connectivity
     do-ip6: no
     prefer-ip6: no
-    
-    # Access control - allow localhost and private networks (including VPN)
-    access-control: 127.0.0.0/8 allow
-    access-control: 10.0.0.0/8 allow
-    access-control: 172.16.0.0/12 allow
-    access-control: 192.168.0.0/16 allow
 
     # Root hints for recursive resolution
     root-hints: "/var/lib/unbound/root.hints"
 
-    # Security settings
+    # Trust glue only if it is within the server's authority
     harden-glue: yes
+
+    # Require DNSSEC data for trust-anchored zones, if such data is absent, the zone becomes BOGUS
     harden-dnssec-stripped: yes
+
+    # Don't use Capitalization randomization as it known to cause DNSSEC issues sometimes
+    # see https://discourse.pi-hole.net/t/unbound-stubby-or-dnscrypt-proxy/9378 for further details
     use-caps-for-id: no
 
-    # Performance optimization
+    # Reduce EDNS reassembly buffer size (DNS Flag Day 2020 recommendation)
     edns-buffer-size: 1232
+
+    # Perform prefetching of close to expired message cache entries
     prefetch: yes
+
+    # One thread should be sufficient, can be increased on beefy machines
     num-threads: 1
+
+    # Ensure kernel buffer is large enough to not lose messages in traffic spikes
     so-rcvbuf: 1m
 
-    # Privacy - block private IP responses
+    # Ensure privacy of local IP ranges
     private-address: 192.168.0.0/16
     private-address: 169.254.0.0/16
     private-address: 172.16.0.0/12
     private-address: 10.0.0.0/8
     private-address: fd00::/8
     private-address: fe80::/10
+
+    # Ensure no reverse queries to non-public IP ranges (RFC6303 4.2)
+    private-address: 192.0.2.0/24
+    private-address: 198.51.100.0/24
+    private-address: 203.0.113.0/24
+    private-address: 255.255.255.255/32
+    private-address: 2001:db8::/32
 EOF
     log_success "Generated Unbound Pi-hole configuration"
     
@@ -938,19 +956,46 @@ EOF
         return 1
     fi
     
-    # Generate dnsmasq Unbound configuration (Pi-hole must be installed first)
-    if [[ ! -d /etc/dnsmasq.d ]]; then
-        log_error "ERROR: /etc/dnsmasq.d directory not found - Pi-hole may not be installed correctly"
-        return 1
+    # Configure Pi-hole v6 to use Unbound as upstream DNS
+    # Pi-hole v6 uses pihole.toml instead of /etc/dnsmasq.d/*.conf by default
+    log_info "Configuring Pi-hole v6 to use Unbound..."
+    
+    local PIHOLE_TOML="/etc/pihole/pihole.toml"
+    
+    if [[ -f "${PIHOLE_TOML}" ]]; then
+        # Enable loading of /etc/dnsmasq.d/*.conf files (disabled by default in v6)
+        if grep -q "etc_dnsmasq_d" "${PIHOLE_TOML}"; then
+            sed -i 's/etc_dnsmasq_d\s*=\s*false/etc_dnsmasq_d = true/' "${PIHOLE_TOML}"
+        else
+            # Add the setting if not present
+            sed -i '/^\[misc\]/a\  etc_dnsmasq_d = true' "${PIHOLE_TOML}"
+        fi
+        log_success "Enabled /etc/dnsmasq.d/ config loading in pihole.toml"
+        
+        # Set upstream DNS to only use Unbound (removes any default like 8.8.8.8, 8.8.4.4)
+        if grep -q "upstreams" "${PIHOLE_TOML}"; then
+            # Replace the upstreams line to use only Unbound
+            sed -i 's/upstreams\s*=\s*\[.*\]/upstreams = [ "127.0.0.1#5335" ]/' "${PIHOLE_TOML}"
+        else
+            # Add the setting if not present
+            sed -i '/^\[dns\]/a\  upstreams = [ "127.0.0.1#5335" ]' "${PIHOLE_TOML}"
+        fi
+        log_success "Configured Pi-hole to use Unbound (127.0.0.1#5335) as only upstream DNS"
+    else
+        log_warning "pihole.toml not found - Pi-hole may need manual DNS configuration"
     fi
     
-    cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
-server=127.0.0.1#5335
+    # Also create dnsmasq.d config for additional settings (now that etc_dnsmasq_d is enabled)
+    if [[ -d /etc/dnsmasq.d ]]; then
+        cat > /etc/dnsmasq.d/51-unbound.conf << 'EOF'
+# Unbound integration - EDNS packet size
+# Note: Pi-hole v6 handles upstream via pihole.toml [dns].upstreams
 edns-packet-max=1232
 EOF
-    log_success "Generated dnsmasq Unbound configuration"
+        log_success "Created /etc/dnsmasq.d/51-unbound.conf for EDNS settings"
+    fi
     
-    # Restart dnsmasq to apply unbound configuration
+    # Restart Pi-hole FTL to apply configuration
     if systemctl is-active --quiet pihole-FTL; then
         systemctl restart pihole-FTL
         log_success "Restarted Pi-hole FTL to apply Unbound configuration"
@@ -1015,13 +1060,15 @@ EOFSCRIPT
     chmod +x "${PATH_FINISHED}/unbound_root_hints_update.sh"
     log_success "Generated Unbound root hints update script"
     
-    # Schedule quarterly root hints update (every 3 months)
-    # Randomize: day 1-5, hour 0-6, minute 0-59, months 1,4,7,10
-    local random_day=$((1 + RANDOM % 5))
-    local random_hour=$((RANDOM % 7))
+    # Schedule monthly root hints update (first week of each month)
+    # Per Pi-hole docs: update roughly every six months, but monthly is fine
+    # Ensure at least 45 minutes from other crons (other crons run around 02:45-04:15)
+    # So we run at 12:00-14:00 range to be well separated
+    local random_day=$((1 + RANDOM % 7))  # Day 1-7 of month
+    local random_hour=$((12 + RANDOM % 3))  # Hour 12-14 (noon-2pm, well away from overnight crons)
     local random_minute=$((RANDOM % 60))
-    (crontab -l 2>/dev/null; echo "${random_minute} ${random_hour} ${random_day} */3 * bash ${PATH_FINISHED}/unbound_root_hints_update.sh >> /var/log/unbound-root-hints.log 2>&1") | crontab -
-    log_success "Scheduled Unbound root hints update (quarterly: $(printf 'day %d, %02d:%02d' ${random_day} ${random_hour} ${random_minute}))"
+    (crontab -l 2>/dev/null; echo "# Unbound root hints update (monthly)"; echo "${random_minute} ${random_hour} ${random_day} * * bash ${PATH_FINISHED}/unbound_root_hints_update.sh >> /var/log/unbound-root-hints.log 2>&1") | crontab -
+    log_success "Scheduled Unbound root hints update (monthly: day ${random_day}, $(printf '%02d:%02d' ${random_hour} ${random_minute}))"
 }
 
 # ============================================================================
@@ -1151,7 +1198,7 @@ setup_cron_jobs() {
     printf "  Allow List Update:  %02d:%02d, %02d:%02d daily\n" \
         ${allow_hour1} ${allow_minute1} ${allow_hour2} ${allow_minute2}
     printf "  System Reboot:      %02d:%02d daily\n" ${reboot_hour} ${reboot_minute}
-    printf "  Unbound Root Hints: Quarterly (every 3 months)\n"
+    printf "  Unbound Root Hints: Monthly (day 1-7, 12:00-14:00)\n"
     
     echo ""
     sleep 3
@@ -1544,38 +1591,85 @@ setup_mfa() {
     fi
     log_success "Installed google-authenticator"
     
-    # Configure PAM
+    # Configure PAM for SSH
+    # Reference: https://ubuntu.com/tutorials/configure-ssh-2fa
     local pam_sshd="/etc/pam.d/sshd"
     local backup_pam="${pam_sshd}.backup.$(date +%Y%m%d-%H%M%S)"
     cp "${pam_sshd}" "${backup_pam}"
+    log_info "Backed up PAM config to ${backup_pam}"
     
     if ! grep -q "pam_google_authenticator.so" "${pam_sshd}"; then
-        echo "" >> "${pam_sshd}"
-        echo "# Google Authenticator" >> "${pam_sshd}"
-        echo "auth required pam_google_authenticator.so" >> "${pam_sshd}"
-        log_success "Added Google Authenticator to PAM configuration"
+        # Insert Google Authenticator at the BEGINNING of the file (before @include common-auth)
+        # Using 'nullok' allows users without TOTP configured to still log in (remove after all users configured)
+        # pam_permit.so is required because nullok returns IGNORE, need at least one SUCCESS
+        local temp_pam="${pam_sshd}.tmp.$$"
+        {
+            echo "# Google Authenticator 2FA (added by installer)"
+            echo "# nullok allows login if user hasn't configured TOTP yet - remove once all users configured"
+            echo "auth required pam_google_authenticator.so nullok"
+            echo "auth required pam_permit.so"
+            echo ""
+            cat "${pam_sshd}"
+        } > "${temp_pam}"
+        mv "${temp_pam}" "${pam_sshd}"
+        chmod 644 "${pam_sshd}"
+        log_success "Added Google Authenticator to PAM configuration (at beginning)"
     else
         log_info "Google Authenticator already configured in PAM"
     fi
     
-    # Configure SSHD for keyboard-interactive
+    # Configure SSHD for 2FA
     local sshd_config="/etc/ssh/sshd_config"
     local backup_sshd="${sshd_config}.backup.mfa.$(date +%Y%m%d-%H%M%S)"
     cp "${sshd_config}" "${backup_sshd}"
+    log_info "Backed up SSH config to ${backup_sshd}"
     
-    # Enable keyboard-interactive authentication
+    # Enable keyboard-interactive authentication (required for PAM/TOTP)
     if grep -q "^KbdInteractiveAuthentication no" "${sshd_config}"; then
         sed -i 's/^KbdInteractiveAuthentication no/KbdInteractiveAuthentication yes/' "${sshd_config}"
-        log_info "Enabled keyboard-interactive authentication"
-    elif grep -q "^ChallengeResponseAuthentication no" "${sshd_config}"; then
-        sed -i 's/^ChallengeResponseAuthentication no/ChallengeResponseAuthentication yes/' "${sshd_config}"
-        log_info "Enabled challenge-response authentication"
-    else
+        log_info "Changed KbdInteractiveAuthentication to yes"
+    elif grep -q "^#KbdInteractiveAuthentication" "${sshd_config}"; then
+        sed -i 's/^#KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' "${sshd_config}"
+        log_info "Enabled KbdInteractiveAuthentication"
+    elif ! grep -q "^KbdInteractiveAuthentication yes" "${sshd_config}"; then
         echo "" >> "${sshd_config}"
-        echo "# Enable 2FA" >> "${sshd_config}"
+        echo "# Enable keyboard-interactive for 2FA" >> "${sshd_config}"
         echo "KbdInteractiveAuthentication yes" >> "${sshd_config}"
-        log_info "Added keyboard-interactive authentication"
+        log_info "Added KbdInteractiveAuthentication yes"
     fi
+    
+    # Handle legacy ChallengeResponseAuthentication (older systems)
+    if grep -q "^ChallengeResponseAuthentication no" "${sshd_config}"; then
+        sed -i 's/^ChallengeResponseAuthentication no/ChallengeResponseAuthentication yes/' "${sshd_config}"
+        log_info "Changed ChallengeResponseAuthentication to yes"
+    fi
+    
+    # CRITICAL: Set AuthenticationMethods to require BOTH pubkey AND TOTP
+    # Comma means AND (both required), space would mean OR
+    if ! grep -q "^AuthenticationMethods" "${sshd_config}"; then
+        echo "" >> "${sshd_config}"
+        echo "# Require both SSH key AND TOTP verification (2FA)" >> "${sshd_config}"
+        echo "AuthenticationMethods publickey,keyboard-interactive:pam" >> "${sshd_config}"
+        log_success "Added AuthenticationMethods: publickey + TOTP required"
+    else
+        log_info "AuthenticationMethods already configured"
+    fi
+    
+    # Ensure UsePAM is enabled
+    if grep -q "^UsePAM no" "${sshd_config}"; then
+        sed -i 's/^UsePAM no/UsePAM yes/' "${sshd_config}"
+        log_info "Enabled UsePAM"
+    fi
+    
+    # Test SSH config before applying
+    if ! sshd -t 2>/dev/null; then
+        log_error "SSH config test failed after MFA changes!"
+        log_warning "Restoring backup..."
+        cp "${backup_sshd}" "${sshd_config}"
+        cp "${backup_pam}" "${pam_sshd}"
+        return 1
+    fi
+    log_success "SSH configuration validated"
     
     # Restart SSH
     if systemctl restart sshd || systemctl restart ssh; then
@@ -1585,26 +1679,35 @@ setup_mfa() {
         return 1
     fi
     
-    # Run google-authenticator setup for the real user
+    # User instructions
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║          GOOGLE AUTHENTICATOR SETUP REQUIRED                 ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "  You must run this command as ${REAL_USER} BEFORE logging out:"
+    echo "  MFA is now configured! You MUST complete setup before logging out."
     echo ""
-    echo "    sudo -u ${REAL_USER} google-authenticator"
+    echo "  Step 1: Run this command as ${REAL_USER}:"
     echo ""
-    echo "  Answer the prompts:"
-    echo "    - Time-based tokens: YES"
+    echo "    google-authenticator"
+    echo ""
+    echo "  Step 2: Answer the prompts:"
+    echo "    - Time-based tokens (TOTP): YES"
     echo "    - Update .google_authenticator file: YES"
     echo "    - Disallow multiple uses: YES"
     echo "    - Increase time window: NO (or YES if experiencing sync issues)"
     echo "    - Enable rate-limiting: YES"
     echo ""
-    echo "  Scan the QR code with your authenticator app (e.g., Google Authenticator)"
+    echo "  Step 3: Scan the QR code with your authenticator app"
+    echo "          (Google Authenticator, Authy, etc.)"
     echo ""
-    log_warning "MFA configured but NOT active until you run: sudo -u ${REAL_USER} google-authenticator"
+    echo "  Step 4: SAVE the emergency scratch codes somewhere safe!"
+    echo ""
+    echo -e "${COLOR_YELLOW}  ⚠ WARNING: Do NOT log out until you complete these steps!${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}  ⚠ The 'nullok' option allows login without TOTP during setup.${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}  ⚠ Remove 'nullok' from /etc/pam.d/sshd once configured.${COLOR_RESET}"
+    echo ""
+    log_warning "MFA configured with 'nullok' - complete google-authenticator setup before logging out!"
     sleep 5
 }
 

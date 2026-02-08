@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2025-08-20
+# Last Modified: 2026-02-07
 # Version: 1.0.0
 #
 # Description: 
@@ -75,8 +75,6 @@ https://raw.githubusercontent.com/dnsblocklistnet/blocklists/master/multilevelma
 ## Other
 https://bitbucket.org/ethanr/dns-blacklists/raw/8575c9f96e5b4a1308f2f12394abd86d0927a4a0/bad_lists/Mandiant_APT1_Report_Appendix_D.txt
 https://raw.githubusercontent.com/IcedComputer/Personal_Contained_Pihole/master/lists/blocks/legacy.blocklist
-https://isc.sans.edu/feeds/suspiciousdomains_High.txt
-https://isc.sans.edu/feeds/suspiciousdomains_Medium.txt
 https://raw.githubusercontent.com/StevenBlack/hosts/master/data/add.Risk/hosts
 
 
@@ -86,8 +84,6 @@ https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/h
 https://raw.githubusercontent.com/dnsblocklistnet/blocklists/master/conspiracy.list
 
 ## Crypto Mining
-https://gitlab.com/ZeroDot1/CoinBlockerLists/raw/master/list_browser.txt
-https://gitlab.com/ZeroDot1/CoinBlockerLists/raw/master/list_optional.txt
 https://raw.githubusercontent.com/anudeepND/blacklist/master/CoinMiner.txt
 https://raw.githubusercontent.com/blocklistproject/Lists/master/crypto.txt
 https://raw.githubusercontent.com/WillPresley/ZeroDot1_CoinBlockerList/refs/heads/main/hosts
