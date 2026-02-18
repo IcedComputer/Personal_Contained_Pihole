@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2025-04-21
+# Last Modified: 2026-02-18
 # Version: 1.0.0
 #
 # Description: 
@@ -31,7 +31,9 @@ gitlab.com
 hosts-file.net
 hostsfile.org
 icedcomputer.github.io
+internic.net
 isc.sans.edu
+lists.malwarepatrol.net
 malware-filter.gitlab.io
 mirror.cedia.org.ec
 mirror1.malwaredomains.com
@@ -42,7 +44,7 @@ raw.githubusercontent.com
 s3.amazonaws.com
 v.firebog.net
 www.github.developerdan.com
+www.internic.net
 www.malwaredomainlist.com
 www.squidblacklist.org
 www.stopforumspam.com
-lists.malwarepatrol.net
