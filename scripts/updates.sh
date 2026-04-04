@@ -4,7 +4,7 @@
 # File: updates.sh
 # Created: 2020-07-25
 # Last Modified: 2026-04-04
-# Version: 2.0.0
+# Version: 2.0.1
 #
 # Description: Automated update manager for Pi-hole configurations
 #              Downloads and deploys adlists, regex rules, allow/block lists
@@ -687,7 +687,7 @@ update_adlists() {
     }
     
     # Format and prepare adlist
-    grep -v '#' "$file" | grep "/" | sort | uniq > "$TEMPDIR/formatted_adlist.temp" || {
+    grep -v '#' "$file" | grep "/" | sort -f -u | uniq > "$TEMPDIR/formatted_adlist.temp" || {
         log "WARNING: No valid adlists found"
         return 0
     }
@@ -944,7 +944,7 @@ download_test_lists() {
     
     debug_log "download_test_lists: Merging trial adlists with main adlists"
     cat "$TEMPDIR/adlists.list.trial.temp" "$TEMPDIR/adlists.list" 2>/dev/null | \
-        grep -v "##" | sort | uniq > "$TEMPDIR/adlists.list.temp" || {
+        grep -v "#" | sort -f -u | uniq > "$TEMPDIR/adlists.list.temp" || {
         log_warning "Failed to merge adlists, using original"
         cp "$TEMPDIR/adlists.list" "$TEMPDIR/adlists.list.temp" 2>/dev/null
     }
