@@ -7,8 +7,8 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2025-09-21
-# Version: 1.0.0
+# Last Modified: 2026-04-04
+# Version: 1.0.1
 #
 # Description: 
 #   Main regex blacklist for Pi-hole containing comprehensive patterns for
@@ -20,6 +20,7 @@
 #   Updates via: sudo bash /scripts/Finished/updates.sh
 #
 ################################################################################
+
 (^|\.)5usakura7s\.co(-8usa)?
 (^|\.)ibs\.lgappstv\.com
 (^|\.)lgsmartad\.compihole
@@ -677,7 +678,6 @@
 *xn--[a-z0-9]*[-_\.]
 .*\.g[0-9]+\..*
 [a-z][a-z][a-z][a-z][a-z][0-9]-doh-[0-9][0-9][0-9]\.aaplimg\.com$
-\......................\.us$
 ^([a-z0-9]+[.])*(ads|captive|cloudservices|logs)\.roku\.com
 ^(www\.)?itunes-[a-zA-Z0-9]*\.
 ^..businessdaily\.com$

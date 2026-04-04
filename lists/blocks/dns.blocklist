@@ -7,8 +7,8 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2024-09-13
-# Version: 1.0.0
+# Last Modified: 2026-04-04
+# Version: 1.0.1
 #
 # Description: 
 #   Blocks known public DNS resolver servers to prevent DNS leaks and enforce
@@ -36,3 +36,5 @@ dot.xfinity.com
 mozilla.cloudflare-dns.com
 use-application-dns.net
 www-cdn.icloud.com.akadns.net
+
+## end

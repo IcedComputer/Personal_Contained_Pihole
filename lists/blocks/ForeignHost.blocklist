@@ -7,8 +7,8 @@
 # 
 # Created: 2020-07-20
 # Organized: 2025-12-07
-# Last Modified: 2024-01-10
-# Version: 1.0.0
+# Last Modified: 2026-04-04
+# Version: 1.0.1
 #
 # Description: 
 #   Valid non-malicious domains that are intentionally blocked for network
@@ -73,7 +73,6 @@ downdetector.co.uk
 downdetector.co.za
 downdetector.com.ar
 downdetector.dk
-downdetector.es
 downdetector.fi
 downdetector.fr
 downdetector.hk
@@ -84,10 +83,7 @@ downdetector.jp
 downdetector.mx
 downdetector.no
 downdetector.pl
-downdetector.pt
 downdetector.ru
-downdetector.se
-downdetector.sg
 downdetector.web.tr
 en.m.yelp.com.hk
 en.m.yelp.com.ph
@@ -144,7 +140,6 @@ m.yelp.pt
 m.yelp.se
 mail.aol.de
 mail.ru
-maps.google.ca
 maps.google.ch
 maps.google.co.jp
 maps.google.co.th
@@ -157,7 +152,6 @@ maps.google.dk
 maps.google.es
 maps.google.it
 maps.google.nl
-maps.google.se
 miami.cbslocal.com
 mx.linkedin.com
 newyork.cbslocal.com
@@ -229,15 +223,12 @@ www.google.es
 www.google.fi
 www.google.gr
 www.google.hu
-www.google.ie
 www.google.it
 www.google.nl
 www.google.no
 www.google.pl
-www.google.pt
 www.google.ro
 www.google.ru
-www.google.se
 www.groupon.ae
 www.groupon.at
 www.groupon.be
@@ -313,3 +304,5 @@ xn--allestrungen-9ib.de
 za.linkedin.com
 zh.m.yelp.com.hk
 zh.yelp.com.hk
+
+## end

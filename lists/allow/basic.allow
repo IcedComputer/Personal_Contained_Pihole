@@ -23,7 +23,9 @@
 
 127.0.0.1
 acs-vzw.jibe.google.com
+aka.ms
 api.push.apple.com
+apple.news
 fp-us-tmobile.rcs.telephony.goog
 fp-us-verizon.rcs.telephony.goog
 rcs-acs-att-us.jibe.google.com
@@ -33,7 +35,6 @@ sdk.waze.com
 share.google
 support.microsoft.com
 telephony.goog
-apple.news
 
 ## end
 

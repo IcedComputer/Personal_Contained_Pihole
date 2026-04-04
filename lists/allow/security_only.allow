@@ -7,8 +7,8 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2025-10-27
-# Version: 1.0.0
+# Last Modified: 2026-04-04
+# Version: 1.0.1
 #
 # Description: 
 #   Essential domains for local network functionality and required services.
@@ -21,7 +21,7 @@
 #
 ################################################################################
 
-aka.ms
+
 bit.ly
 goo.gl
 ow.ly
@@ -31,3 +31,5 @@ shorturl.at
 t.co
 w.wiki
 youtu.be
+
+## end

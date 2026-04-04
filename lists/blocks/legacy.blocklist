@@ -7,8 +7,8 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2025-12-07
-# Version: 1.0.0
+# Last Modified: 2026-04-04
+# Version: 1.0.1
 #
 # Description: 
 #   Consolidated legacy static blocklists. Combined from multiple historical
@@ -829600,3 +829600,5 @@ zzzyzs.net
 zzzzz.cauction.hop.clickbank.net
 zzzzz.regmum.hop.clickbank.net
 zzzzzzzz.su
+
+## end
