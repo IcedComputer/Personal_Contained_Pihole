@@ -3,7 +3,7 @@
 # Pi-hole Update Manager
 # File: updates.sh
 # Created: 2020-07-25
-# Last Modified: 2025-12-07
+# Last Modified: 2026-04-04
 # Version: 2.0.0
 #
 # Description: Automated update manager for Pi-hole configurations
@@ -1111,9 +1111,9 @@ assemble_and_deploy() {
     done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.regex.temp' -print0 2>/dev/null)
     
     if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
-        grep -v '^#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
+        grep -v '#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$TEMPDIR/final.allow.regex.temp"
+            sort -u -f | uniq > "$TEMPDIR/final.allow.regex.temp"
         rm -f "$TEMPDIR/final.allow.regex.temp.raw"
         debug_log "assemble_and_deploy: Allow regex assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp" 2>/dev/null || echo 0) entries"
     else
@@ -1136,9 +1136,9 @@ assemble_and_deploy() {
     done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.temp' -print0 2>/dev/null)
     
     if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
-        grep -v '^#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
+        grep -v '#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$TEMPDIR/final.allow.temp"
+            sort -u -f | uniq > "$TEMPDIR/final.allow.temp"
         rm -f "$TEMPDIR/final.allow.temp.raw"
         debug_log "assemble_and_deploy: Allow list assembled: $(wc -l < "$TEMPDIR/final.allow.temp" 2>/dev/null || echo 0) entries"
     else
@@ -1157,9 +1157,9 @@ assemble_and_deploy() {
     done < <(find "$TEMPDIR" -maxdepth 1 -name '*.regex' -print0 2>/dev/null)
     
     if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
-        grep -v '^#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
+        grep -v '#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$TEMPDIR/regex.list"
+            sort -u -f | uniq > "$TEMPDIR/regex.list"
         rm -f "$TEMPDIR/regex.list.raw"
         debug_log "assemble_and_deploy: Regex list assembled: $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
     else
@@ -1178,9 +1178,9 @@ assemble_and_deploy() {
     done < <(find "$TEMPDIR" -maxdepth 1 -name '*.block.encrypt.temp' -print0 2>/dev/null)
     
     if [[ -f "$CONFIG/encrypt.list.raw" && -s "$CONFIG/encrypt.list.raw" ]]; then
-        grep -v '^#' "$CONFIG/encrypt.list.raw" 2>/dev/null | \
+        grep -v '#' "$CONFIG/encrypt.list.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$CONFIG/encrypt.list"
+            sort -u -f | uniq > "$CONFIG/encrypt.list"
         rm -f "$CONFIG/encrypt.list.raw"
         debug_log "assemble_and_deploy: Encrypt list assembled: $(wc -l < "$CONFIG/encrypt.list" 2>/dev/null || echo 0) entries"
     else
@@ -1247,9 +1247,9 @@ assemble_and_deploy_regex_only() {
     done < <(find "$TEMPDIR" -maxdepth 1 -name '*.regex' -print0 2>/dev/null)
     
     if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
-        grep -v '^#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
+        grep -v '#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$TEMPDIR/regex.list"
+            sort -u -f | uniq > "$TEMPDIR/regex.list"
         rm -f "$TEMPDIR/regex.list.raw"
         debug_log "assemble_and_deploy_regex_only: Assembled $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
     else
@@ -1444,9 +1444,9 @@ cmd_allow_update() {
     
     # Filter and dedupe if we have content
     if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
-        grep -v '^#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
+        grep -v '#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$TEMPDIR/final.allow.regex.temp"
+            sort -u -f | uniq > "$TEMPDIR/final.allow.regex.temp"
         rm -f "$TEMPDIR/final.allow.regex.temp.raw"
         debug_log "cmd_allow_update: Allow regex patterns assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp") entries"
     else
@@ -1473,9 +1473,9 @@ cmd_allow_update() {
     
     # Filter and dedupe if we have content
     if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
-        grep -v '^#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
+        grep -v '#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort | uniq > "$TEMPDIR/final.allow.temp"
+            sort -u -f | uniq > "$TEMPDIR/final.allow.temp"
         rm -f "$TEMPDIR/final.allow.temp.raw"
         debug_log "cmd_allow_update: Allow domains assembled: $(wc -l < "$TEMPDIR/final.allow.temp") entries"
     else
