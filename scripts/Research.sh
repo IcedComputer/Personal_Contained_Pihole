@@ -29,7 +29,7 @@ set -euo pipefail
 # CONFIGURATION
 # ============================================================================
 
-readonly LOGFILE="/var/log/pihole.log"
+readonly LOGFILE="/var/log/pihole/pihole.log"
 readonly TEMPDIR="/scripts/temp"
 readonly OUTPUT_DIR="${TEMPDIR}"
 
@@ -47,9 +47,11 @@ echo "Analyzing: ${LOGFILE}"
 echo ""
 
 # 1. Extract domains that received DNS responses (allowed/forwarded to upstream)
-# These are queries that got actual IP addresses back, excluding CNAME/NODATA/HTTPS-only responses
+# Pi-hole v6 log format: "reply <domain> is <address>" for forwarded queries
+# Also match "forwarded" entries and filter out blocked/denied entries
 echo "[1/3] Extracting domains allowed by Pi-hole (forwarded to upstream DNS)..."
 grep -v "blocked" "${LOGFILE}" | \
+    grep -v "denied" | \
     grep -v "CNAME" | \
     grep -v "NODATA" | \
     grep -v "HTTPS" | \
@@ -59,21 +61,24 @@ grep -v "blocked" "${LOGFILE}" | \
 ALLOWED_COUNT=$(wc -l < "${ALLOWED_FILE}" 2>/dev/null || echo 0)
 echo "   ✓ Found ${ALLOWED_COUNT} unique allowed domains"
 
-# 2. Extract domains blocked by regex rules (blacklisted)
-# These show as "blacklisted" in the logs
+# 2. Extract domains blocked by regex rules (regex denylisted)
+# Pi-hole v6 logs regex blocks as "denied" or "blocked" with regex indicators
+# Match both v5 "blacklisted" and v6 "regex" deny patterns
 echo "[2/3] Extracting domains blocked by regex rules..."
-grep "blacklisted" "${LOGFILE}" | \
+grep -E "(blacklisted|regex denied|regex blocked)" "${LOGFILE}" | \
     grep -oP '[^\s]+(?=\sis)' | \
     sort | uniq -c | sort -rn > "${REGEX_BLOCKED_FILE}"
 
 REGEX_COUNT=$(wc -l < "${REGEX_BLOCKED_FILE}" 2>/dev/null || echo 0)
 echo "   ✓ Found ${REGEX_COUNT} unique regex-blocked domains"
 
-# 3. Extract domains blocked by exact-match blocklists
-# These show as "blocked" (but not "blacklisted") in the logs
+# 3. Extract domains blocked by exact-match blocklists (gravity)
+# Pi-hole v6 logs exact blocks as "blocked" or "gravity blocked" or "denied"
+# Exclude regex matches to isolate exact-match blocks
 echo "[3/3] Extracting domains blocked by exact-match blocklists..."
-grep "blocked" "${LOGFILE}" | \
+grep -E "(blocked|denied)" "${LOGFILE}" | \
     grep -v "blacklisted" | \
+    grep -v "regex" | \
     grep -oP '[^\s]+(?=\sis)' | \
     sort | uniq -c | sort -rn > "${BLOCKLIST_BLOCKED_FILE}"
 

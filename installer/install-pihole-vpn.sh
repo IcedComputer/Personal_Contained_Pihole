@@ -587,11 +587,13 @@ create_directories() {
     mkdir -p "${PATH_TEMP}"
     mkdir -p "${PATH_FINISHED}"
     mkdir -p "${PATH_CONFIG}"
+    mkdir -p "${PATH_CONFIG}/lists"
     
     chmod 755 "${PATH_SCRIPTS}"
     chmod 755 "${PATH_TEMP}"
     chmod 755 "${PATH_FINISHED}"
     chmod 755 "${PATH_CONFIG}"  # Changed to 755 so updates.sh can read config files
+    chmod 755 "${PATH_CONFIG}/lists"  # Writable for updates.sh to deploy list files
     
     log_success "Directories created"
 }
@@ -1987,7 +1989,7 @@ main() {
     local step=1
     
     echo "${step}. Set Pi-hole admin password:"
-    echo "   sudo pihole -a -p"
+    echo "   sudo pihole setpassword"
     echo ""
     ((step++))
     

@@ -4,7 +4,7 @@
 **Type:** Technical Documentation  
 **Category:** Development Reference  
 **Created:** 2025-12-07  
-**Version:** 1.0.0
+**Version:** 2.0.1
 
 ---
 
@@ -200,13 +200,19 @@ Automated installer and maintenance system for Pi-hole DNS ad-blocker with optio
       ├── CONFIG/              # Configuration files (755 permissions)
       │   ├── type.conf                  (server type: "full"/"security"/"basic")
       │   ├── test.conf                  (test mode: "no"/"yes" - literal strings)
-      │   └── dns_type.conf              ("unbound" - DNS resolver)
+      │   ├── dns_type.conf              ("unbound" - DNS resolver)
+      │   └── lists/                     (source-of-truth list copies, 755)
+      │       ├── whitelist.txt
+      │       ├── regex.list
+      │       ├── adlists.list
+      │       └── encrypt.list
       └── *.sh                 # All management scripts (755)
 ```
 
-### 2. updates.sh (1,758 lines)
+### 2. updates.sh (1,758+ lines)
 
 **Purpose:** Central update manager for lists, scripts, and database
+**Version:** 2.0.1 (Last Modified: 2026-04-04)
 
 **Key Commands:**
 - `full-update` - Everything (lists + scripts + database)
@@ -395,29 +401,33 @@ User runs: updates.sh full-update
 5. **Assembly Phase** (assemble_and_deploy)
    - Merge all regex files → regex.list
    - Merge all allowlists → whitelist.txt
-   - Clean line endings
-   - Remove duplicates
-   - Sort for consistency
+   - Strip comments (`grep -v '#'`) and blank lines
+   - Deduplicate with case-insensitive sort (`sort -u -f`)
+   - Merge encrypted blocklists → encrypt.list
 
 6. **Deployment Phase**
-   - Deploy regex.list → /etc/pihole/
-   - Deploy whitelist.txt → /etc/pihole/
-   - Deploy adlists.list → /etc/pihole/
-   - Deploy scripts → /scripts/Finished/
+   - Deploy regex.list → `/scripts/Finished/CONFIG/lists/` (source-of-truth copy)
+   - Deploy whitelist.txt → `/scripts/Finished/CONFIG/lists/`
+   - Deploy adlists.list → `/scripts/Finished/CONFIG/lists/`
+   - Deploy encrypt.list → `/scripts/Finished/CONFIG/`
+   - Deploy scripts → `/scripts/Finished/`
    - Set permissions (755 for scripts)
 
 7. **Database Update** (update_pihole_database)
+   - Read from LISTS_DIR source-of-truth files
    - Clear domainlist table
-   - Insert allowlist domains (type=0)
-   - Insert regex patterns (type=2 for allow, type=3 for block)
-   - Mark all as enabled
+   - Insert allowlist domains (type=0) via SQL transactions
+   - Insert allow regex patterns (type=2) via SQL transactions
+   - Insert block regex patterns (type=3) via SQL transactions
+   - Update adlist table with URLs
+   - All inserts use `INSERT OR IGNORE` to prevent duplicates
 
 8. **Service Restart**
-   - `pihole reloaddns`
-   - Verify FTL service running
+   - `pihole updateGravity` (Pi-hole v6 command, includes DNS reload)
 
 9. **Post-Update**
    - Log completion
+   - Show categorized error summary (if any errors occurred)
    - Check if reboot needed
    - Display summary
 
@@ -683,6 +693,12 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
     ├── CONFIG/                              (700, root:root) ← CRITICAL
     │   ├── backups/                         (700, root:root)
     │   │   └── github_token_*.conf.bak      (600, root:root)
+    │   ├── lists/                           (755, root:root) ← SOURCE-OF-TRUTH
+    │   │   ├── whitelist.txt                (644, root:root)
+    │   │   ├── regex.list                   (644, root:root)
+    │   │   └── adlists.list                 (644, root:root)
+    │   ├── public-gpg-keys/                 (755, root:root)
+    │   │   └── *.gpg                        (644, root:root)
     │   ├── github_token.conf                (600, root:root) ← SENSITIVE
     │   ├── github_token_expiry.conf         (600, root:root)
     │   ├── type.conf                        (644, root:root)
@@ -699,8 +715,7 @@ Permanent Ban: 2 recidive bans within 7 days → Permanent ban (-1)
 
 /etc/pihole/                                 (755, root:root)
 ├── gravity.db                               (644, pihole:pihole)
-├── pihole-FTL.conf                          (644, root:root)
-├── setupVars.conf                           (644, root:root)
+├── pihole.toml                              (644, root:root)
 ├── adlists.list                             (644, root:root)
 ├── whitelist.txt                            (644, root:root)
 └── regex.list                               (644, root:root)
@@ -1070,7 +1085,7 @@ sudo netstat -tulpn | grep -E ":(53|5335|51820|22|80)"
 # :5335 - unbound (127.0.0.1)
 # :51820 - (UDP) [if WireGuard installed]
 # :22   - sshd (0.0.0.0)
-# :80   - lighttpd (0.0.0.0)
+# :80   - pihole-FTL (0.0.0.0) [embedded web server in Pi-hole v6]
 ```
 
 **4. File Permissions**

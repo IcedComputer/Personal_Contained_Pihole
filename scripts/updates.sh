@@ -60,6 +60,7 @@ readonly FINISHED=/scripts/Finished
 readonly TEMPDIR=/scripts/temp
 readonly PIDIR=/etc/pihole
 readonly CONFIG=/scripts/Finished/CONFIG
+readonly LISTS_DIR=/scripts/Finished/CONFIG/lists
 readonly GRAVITY_DB="/etc/pihole/gravity.db"
 readonly LOGFILE=/var/log/pihole-updates.log
 
@@ -551,7 +552,7 @@ update_allow_regex_v6() {
 }
 
 update_allow_v6() {
-    local file="$PIDIR/whitelist.txt"
+    local file="$LISTS_DIR/whitelist.txt"
     
     debug_log "update_allow_v6: Starting function"
     debug_log "update_allow_v6: Looking for file: $file"
@@ -588,8 +589,9 @@ update_allow_v6() {
     debug_log "update_allow_v6: Reading domains from $file"
     while IFS= read -r domain; do
         [[ -z "$domain" ]] && continue
-        # Type 0 = exact whitelist, enabled = 1
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (0, '${domain}', 1);" >> "$temp_sql"
+        # Type 0 = exact allowlist, enabled = 1
+        local escaped_domain="${domain//\'/\'\'}"
+        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (0, '${escaped_domain}', 1);" >> "$temp_sql"
         ((count++))
         verbose_log "Queued allow domain: $domain"
     done < "$file"
@@ -619,7 +621,7 @@ update_allow_v6() {
 }
 
 update_regex_v6() {
-    local file="$PIDIR/regex.list"
+    local file="$LISTS_DIR/regex.list"
     
     debug_log "update_regex_v6: Starting function"
     debug_log "update_regex_v6: Looking for file: $file"
@@ -674,7 +676,7 @@ update_regex_v6() {
 #======================================================================================
 
 update_adlists() {
-    local file="$PIDIR/adlists.list"
+    local file="$LISTS_DIR/adlists.list"
     
     [[ ! -f "$file" ]] && { log "No adlists file found, skipping"; return 0; }
     
@@ -687,7 +689,7 @@ update_adlists() {
     }
     
     # Format and prepare adlist
-    grep -v '#' "$file" | grep "/" | sort -f -u | uniq > "$TEMPDIR/formatted_adlist.temp" || {
+    grep -v '#' "$file" | grep "/" | sort -u -f > "$TEMPDIR/formatted_adlist.temp" || {
         log "WARNING: No valid adlists found"
         return 0
     }
@@ -944,7 +946,7 @@ download_test_lists() {
     
     debug_log "download_test_lists: Merging trial adlists with main adlists"
     cat "$TEMPDIR/adlists.list.trial.temp" "$TEMPDIR/adlists.list" 2>/dev/null | \
-        grep -v "#" | sort -f -u | uniq > "$TEMPDIR/adlists.list.temp" || {
+        grep -v "#" | sort -u -f > "$TEMPDIR/adlists.list.temp" || {
         log_warning "Failed to merge adlists, using original"
         cp "$TEMPDIR/adlists.list" "$TEMPDIR/adlists.list.temp" 2>/dev/null
     }
@@ -1113,7 +1115,7 @@ assemble_and_deploy() {
     if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
         grep -v '#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$TEMPDIR/final.allow.regex.temp"
+            sort -u -f > "$TEMPDIR/final.allow.regex.temp"
         rm -f "$TEMPDIR/final.allow.regex.temp.raw"
         debug_log "assemble_and_deploy: Allow regex assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp" 2>/dev/null || echo 0) entries"
     else
@@ -1138,7 +1140,7 @@ assemble_and_deploy() {
     if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
         grep -v '#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$TEMPDIR/final.allow.temp"
+            sort -u -f > "$TEMPDIR/final.allow.temp"
         rm -f "$TEMPDIR/final.allow.temp.raw"
         debug_log "assemble_and_deploy: Allow list assembled: $(wc -l < "$TEMPDIR/final.allow.temp" 2>/dev/null || echo 0) entries"
     else
@@ -1159,7 +1161,7 @@ assemble_and_deploy() {
     if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
         grep -v '#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$TEMPDIR/regex.list"
+            sort -u -f > "$TEMPDIR/regex.list"
         rm -f "$TEMPDIR/regex.list.raw"
         debug_log "assemble_and_deploy: Regex list assembled: $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
     else
@@ -1180,26 +1182,27 @@ assemble_and_deploy() {
     if [[ -f "$CONFIG/encrypt.list.raw" && -s "$CONFIG/encrypt.list.raw" ]]; then
         grep -v '#' "$CONFIG/encrypt.list.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$CONFIG/encrypt.list"
+            sort -u -f > "$CONFIG/encrypt.list"
         rm -f "$CONFIG/encrypt.list.raw"
         debug_log "assemble_and_deploy: Encrypt list assembled: $(wc -l < "$CONFIG/encrypt.list" 2>/dev/null || echo 0) entries"
     else
         debug_log "assemble_and_deploy: No encrypted block files found"
     fi
     
-    # Deploy files
-    debug_log "assemble_and_deploy: Deploying configuration files"
-    mv "$TEMPDIR/regex.list" "$PIDIR/regex.list" || {
+    # Deploy files to CONFIG/lists/ (Pi-hole v6 reads from gravity.db, these are our source-of-truth copies)
+    debug_log "assemble_and_deploy: Deploying configuration files to $LISTS_DIR"
+    mkdir -p "$LISTS_DIR"
+    mv "$TEMPDIR/regex.list" "$LISTS_DIR/regex.list" || {
         log "WARNING: Failed to deploy regex.list"
-        DEPLOY_ERRORS+=("DEPLOY FAILED: regex.list to $PIDIR/regex.list")
+        DEPLOY_ERRORS+=("DEPLOY FAILED: regex.list to $LISTS_DIR/regex.list")
     }
-    mv "$TEMPDIR/final.allow.temp" "$PIDIR/whitelist.txt" || {
+    mv "$TEMPDIR/final.allow.temp" "$LISTS_DIR/whitelist.txt" || {
         log "WARNING: Failed to deploy whitelist.txt"
-        DEPLOY_ERRORS+=("DEPLOY FAILED: whitelist.txt to $PIDIR/whitelist.txt")
+        DEPLOY_ERRORS+=("DEPLOY FAILED: whitelist.txt to $LISTS_DIR/whitelist.txt")
     }
-    mv "$TEMPDIR/adlists.list" "$PIDIR/adlists.list" || {
+    mv "$TEMPDIR/adlists.list" "$LISTS_DIR/adlists.list" || {
         log "WARNING: Failed to deploy adlists.list"
-        DEPLOY_ERRORS+=("DEPLOY FAILED: adlists.list to $PIDIR/adlists.list")
+        DEPLOY_ERRORS+=("DEPLOY FAILED: adlists.list to $LISTS_DIR/adlists.list")
     }
     
     # CFconfig is now generated locally during installation, not downloaded
@@ -1249,16 +1252,17 @@ assemble_and_deploy_regex_only() {
     if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
         grep -v '#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$TEMPDIR/regex.list"
+            sort -u -f > "$TEMPDIR/regex.list"
         rm -f "$TEMPDIR/regex.list.raw"
         debug_log "assemble_and_deploy_regex_only: Assembled $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
     else
         log_warning "No regex files found to assemble"
     fi
     
-    # Deploy regex file
+    # Deploy regex file to CONFIG/lists/ (Pi-hole v6 reads from gravity.db, this is our source-of-truth copy)
     if [[ -f "$TEMPDIR/regex.list" && -s "$TEMPDIR/regex.list" ]]; then
-        mv "$TEMPDIR/regex.list" "$PIDIR/regex.list" || {
+        mkdir -p "$LISTS_DIR"
+        mv "$TEMPDIR/regex.list" "$LISTS_DIR/regex.list" || {
             log_error "Failed to deploy regex.list"
             DEPLOY_ERRORS+=("DEPLOY FAILED: regex.list")
         }
@@ -1275,11 +1279,8 @@ assemble_and_deploy_regex_only() {
 restart_services() {
     log "Restarting Pi-hole services..."
     
-    # Reload DNS cache (Pi-hole v6 command)
-    pihole reloaddns
-    
-    # Update gravity database
-    pihole -g
+    # Update gravity database (Pi-hole v6 command, includes DNS reload)
+    pihole updateGravity
     
     log "Pi-hole services restarted"
 }
@@ -1446,7 +1447,7 @@ cmd_allow_update() {
     if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
         grep -v '#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$TEMPDIR/final.allow.regex.temp"
+            sort -u -f > "$TEMPDIR/final.allow.regex.temp"
         rm -f "$TEMPDIR/final.allow.regex.temp.raw"
         debug_log "cmd_allow_update: Allow regex patterns assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp") entries"
     else
@@ -1475,16 +1476,17 @@ cmd_allow_update() {
     if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
         grep -v '#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
             grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f | uniq > "$TEMPDIR/final.allow.temp"
+            sort -u -f > "$TEMPDIR/final.allow.temp"
         rm -f "$TEMPDIR/final.allow.temp.raw"
         debug_log "cmd_allow_update: Allow domains assembled: $(wc -l < "$TEMPDIR/final.allow.temp") entries"
     else
         debug_log "cmd_allow_update: No allow files found to assemble"
     fi
     
-    # Deploy allow lists
+    # Deploy allow lists to CONFIG/lists/ (Pi-hole v6 reads from gravity.db, this is our source-of-truth copy)
     if [[ -f "$TEMPDIR/final.allow.temp" && -s "$TEMPDIR/final.allow.temp" ]]; then
-        mv "$TEMPDIR/final.allow.temp" "$PIDIR/whitelist.txt" || {
+        mkdir -p "$LISTS_DIR"
+        mv "$TEMPDIR/final.allow.temp" "$LISTS_DIR/whitelist.txt" || {
             log_error "Failed to deploy whitelist.txt"
             DEPLOY_ERRORS+=("DEPLOY FAILED: whitelist.txt")
         }
@@ -1495,7 +1497,10 @@ cmd_allow_update() {
     # Update database with allow lists only (integrated functionality)
     update_pihole_database_allow_only
     
-    restart_services
+    # Reload lists only — purely additive, do not rebuild gravity
+    log "Reloading Pi-hole lists (additive update)..."
+    pihole reloadlists
+    
     cleanup
     
     log "=== Allow list update completed ==="
@@ -1585,7 +1590,11 @@ cmd_block_regex_update() {
     fi
     
     assemble_and_deploy_regex_only
-    restart_services
+    
+    # Reload lists only — purely additive, do not rebuild gravity
+    log "Reloading Pi-hole lists (additive update)..."
+    pihole reloadlists
+    
     cleanup
     
     log "=== Block regex update completed ==="

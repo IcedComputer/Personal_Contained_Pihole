@@ -1,6 +1,6 @@
 # Pi-hole + WireGuard VPN Installer
 
-**Version:** 1.0.0  
+**Version:** 2.0.1  
 **Created:** 2025-12-07  
 **Platforms:** Raspberry Pi, Ubuntu Server, Azure
 
@@ -289,14 +289,13 @@ After successful installation:
    Edit /etc/ssh/sshd_config and add your username to AllowUsers
 
 2. Create WireGuard VPN clients:
-   Run: pivpn add
-   Or use: /scripts/Finished/wireguard-manager.sh
+   Run: sudo bash /scripts/Finished/wireguard-manager.sh
 
 3. Access Pi-hole admin interface:
    http://10.0.0.10/admin
 
 4. Set Pi-hole admin password:
-   sudo pihole -a -p
+   sudo pihole setpassword
 
 5. Review installation log:
    /var/log/pihole-vpn-install.log
@@ -365,21 +364,21 @@ The installer creates **randomized** cron schedules to reduce load on GitHub and
 
 #### Gravity Refresh
 ```
-Command: updates_optimized.sh refresh
+Command: updates.sh refresh
 Schedule: 1-3 hours before purge-and-update (randomized)
 Purpose: Updates Pi-hole's gravity database from subscribed lists
 ```
 
 #### Purge and Update
 ```
-Command: updates_optimized.sh purge-and-update
+Command: updates.sh purge-and-update
 Schedule: ~3:30 AM ±45 minutes (randomized per install)
 Purpose: Comprehensive update - purges old data, downloads all lists
 ```
 
 #### Allow List Updates
 ```
-Command: updates_optimized.sh allow-update
+Command: updates.sh allow-update
 Schedule: Every 8 hours (offset from purge time)
 Purpose: Updates allowlists only (faster, less intrusive)
 ```
@@ -408,19 +407,19 @@ Run updates manually anytime:
 
 ```bash
 # Full comprehensive update
-/scripts/Finished/updates_optimized.sh purge-and-update
+/scripts/Finished/updates.sh purge-and-update
 
 # Quick allowlist update
-/scripts/Finished/updates_optimized.sh allow-update
+/scripts/Finished/updates.sh allow-update
 
 # Refresh gravity only
-/scripts/Finished/updates_optimized.sh refresh
+/scripts/Finished/updates.sh refresh
 
 # Block regex lists only
-/scripts/Finished/updates_optimized.sh block-regex-update
+/scripts/Finished/updates.sh block-regex-update
 
 # See all options
-/scripts/Finished/updates_optimized.sh --help
+/scripts/Finished/updates.sh help
 ```
 
 ---
@@ -562,18 +561,17 @@ sudo bash install-pihole-vpn.sh --debug
 
 **Check:**
 ```bash
-# Verify lighttpd is running
-sudo systemctl status lighttpd
+# Verify Pi-hole FTL is running (v6 uses embedded web server)
+sudo systemctl status pihole-FTL
 
 # Restart if needed
-sudo systemctl restart lighttpd
+sudo systemctl restart pihole-FTL
 ```
 
 **Solution:**
 ```bash
 # Repair Pi-hole
-sudo pihole -r
-# Choose "Repair" option
+sudo pihole reconfigure
 ```
 
 #### Issue: DNS not resolving
@@ -590,7 +588,7 @@ sudo systemctl status pihole-FTL
 **Solution:**
 ```bash
 # Restart DNS
-sudo pihole reloaddns
+sudo pihole reloadlists
 
 # If using Unbound
 sudo service unbound restart
@@ -675,6 +673,14 @@ sudo journalctl -f
 ### Automatically Generated Files
 
 The installer creates configuration files in `/scripts/Finished/CONFIG/` that are used by update scripts:
+
+**lists/** - Source-of-truth list directory (`/scripts/Finished/CONFIG/lists/`)
+```bash
+# Assembled list files deployed here by updates.sh, then loaded into gravity.db
+whitelist.txt        # Assembled allowlist domains
+regex.list           # Assembled regex block patterns
+adlists.list         # Blocklist subscription URLs
+```
 
 **type.conf** - Installation profile
 ```bash
@@ -844,8 +850,10 @@ The `updates.sh` script uses SQL batch operations for 100x performance improveme
 ### Backup Configuration
 
 ```bash
-# Backup Pi-hole configuration
-sudo pihole -a -t
+# Backup Pi-hole configuration (Pi-hole v6 teleporter)
+# Use the web interface: Settings > Teleporter > Export
+# Or via CLI:
+sudo pihole teleporter export
 
 # Backup WireGuard configs
 sudo tar -czf wireguard-backup.tar.gz /etc/wireguard/
@@ -858,7 +866,7 @@ sudo tar -czf scripts-backup.tar.gz /scripts/Finished/
 
 ```bash
 # Restore Pi-hole from teleporter backup
-# Upload .tar.gz via web interface: Settings > Teleporter
+# Upload .tar.gz via web interface: Settings > Teleporter > Import
 
 # Restore WireGuard
 sudo tar -xzf wireguard-backup.tar.gz -C /
@@ -881,8 +889,8 @@ If system becomes unresponsive:
 # Re-run installer with existing config
 sudo bash install-pihole-vpn.sh
 
-# Restore from backup
-sudo pihole -a -t /path/to/backup.tar.gz
+# Restore from Pi-hole teleporter backup via web interface:
+# Settings > Teleporter > Import
 ```
 
 ---
@@ -946,6 +954,17 @@ sudo rm -rf /etc/wireguard/
 
 ## Changelog
 
+### Version 2.0.1 (2026-04-04)
+
+- Pi-hole v6 exclusive support (pihole.toml, embedded web server)
+- Direct gravity.db manipulation with SQL transactions (100x faster)
+- Command-line flags: `--verbose`, `--debug`, `--no-reboot`
+- Categorized error tracking and summary
+- Automatic GPG public key detection and import
+- Lists directory (`/scripts/Finished/CONFIG/lists`) for source-of-truth copies
+- Network connectivity pre-flight checks
+- Debug logging with timestamped trace output
+
 ### Version 1.0.0 (2025-12-07)
 
 **Initial Release:**
@@ -971,10 +990,9 @@ This installer is provided as-is with no warranty. Use at your own risk.
 Based on:
 - Pi-hole (licensed under EUPL v1.2)
 - WireGuard (licensed under GPLv2)
-- PiVPN (licensed under MIT)
 
 ---
 
-**Last Updated:** 2025-12-07  
+**Last Updated:** 2026-04-06  
 **Maintainer:** IcedComputer  
-**Version:** 1.0.0
+**Version:** 2.0.1

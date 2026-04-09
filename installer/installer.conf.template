@@ -83,7 +83,7 @@ DNS_TYPE="unbound"
 
 # Install WireGuard VPN
 # Options: "yes", "no"
-# Set to "yes" to install WireGuard VPN via PiVPN
+# Set to "yes" to install WireGuard VPN
 # Set to "no" to skip VPN installation (Pi-hole only)
 #
 # If "yes":
@@ -251,11 +251,19 @@ PIHOLE_VERSION="6"
 
 # VPN Client Management:
 # After installation with INSTALL_VPN="yes", use:
-#   pivpn add              - Add new VPN client
-#   pivpn remove           - Remove VPN client
-#   pivpn list             - List all clients
-#   pivpn qrcode           - Show QR code for mobile devices
-#   pivpn -h               - Full help menu
+#   sudo bash /scripts/Finished/wireguard-manager.sh
+#
+# Menu options:
+#   1) Add new VPN client
+#   2) Remove VPN client
+#   3) List all clients
+#   4) Show client configuration
+#   5) Show QR code for mobile devices
+#   6) Revoke client access
+#   7) Show VPN statistics
+#   8) Restart WireGuard
+#   9) Backup configurations
+#   10) Show file locations
 
 # ============================================================================
 # EXAMPLE CONFIGURATIONS

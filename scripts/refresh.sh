@@ -3,8 +3,8 @@
 # Script Refresh Manager
 # File: refresh.sh
 # Created: 2020-07-25
-# Last Modified: 2025-12-07
-# Version: 1.0.0
+# Last Modified: 2026-04-06
+# Version: 1.0.1
 #
 # Description: Updates management scripts from repository
 #              Downloads latest versions of updates.sh and Research.sh
@@ -79,9 +79,37 @@ function move()
 	log "Run 'sudo bash $FINISHED/updates.sh refresh' to update all other scripts"
 }
 
+#### START ######
+# TEMPORARY FUNCTION: Ensures the new lists directory exists with correct permissions.
+# This is needed for systems installed before the LISTS_DIR migration.
+# This function can be deleted once all deployed systems have been updated.
+ensure_lists_dir() {
+    local lists_dir="/scripts/Finished/CONFIG/lists"
+
+    if [[ -d "$lists_dir" ]]; then
+        local perms
+        perms=$(stat -c '%a' "$lists_dir" 2>/dev/null)
+        if [[ "$perms" == "755" ]]; then
+            log "Lists directory already exists with correct permissions (755)"
+            return 0
+        else
+            log "Lists directory exists but has permissions $perms, fixing to 755..."
+            chmod 755 "$lists_dir"
+            log_success "Fixed permissions on $lists_dir"
+        fi
+    else
+        log "Lists directory does not exist, creating..."
+        mkdir -p "$lists_dir"
+        chmod 755 "$lists_dir"
+        log_success "Created $lists_dir with permissions 755"
+    fi
+}
+#### END ######
+
 # ============================================================================
 # MAIN
 # ============================================================================
 
+ensure_lists_dir
 download
 move

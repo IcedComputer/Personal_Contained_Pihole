@@ -1,7 +1,8 @@
 # Pi-hole + WireGuard VPN Installer
 
-**Version:** 1.0.0  
+**Version:** 2.0.1  
 **Created:** 2025-12-07  
+**Last Updated:** 2026-04-06  
 **Repository:** Personal_Contained_Pihole
 
 ---
@@ -12,13 +13,15 @@ Automated installer for Pi-hole DNS ad-blocking with WireGuard VPN on Raspberry 
 
 ### Key Features
 
+- ✅ **Pi-hole v6 Support** - Direct gravity.db manipulation with SQL transactions
 - ✅ **One-Command Installation** - Interactive or fully unattended setup
 - ✅ **Recursive DNS** - Unbound for maximum privacy (no third-party logging)
 - ✅ **WireGuard VPN** - Optional VPN with easy client management
 - ✅ **Security Hardening** - SSH hardening, Fail2Ban with progressive banning, MFA support
 - ✅ **Automated Updates** - Scheduled list updates and maintenance scripts
-- ✅ **Encrypted Lists** - GPG-encrypted custom blocklists/allowlists
+- ✅ **Encrypted Lists** - GPG-encrypted custom blocklists/allowlists with auto key management
 - ✅ **Multiple Profiles** - Full protection, security-only, or basic configurations
+- ✅ **Debug & Diagnostics** - Verbose/debug modes with categorized error summaries
 
 ---
 
@@ -92,7 +95,7 @@ Personal_Contained_Pihole/
 │   ├── install-pihole-vpn.sh       # Main installer script
 │   └── installer.conf.template      # Configuration template
 ├── scripts/
-│   ├── updates.sh                   # Main update script (list management)
+│   ├── updates.sh                   # Main update script (list management, v2.0.1)
 │   ├── refresh.sh                   # Bootstrap script (updates updates.sh)
 │   ├── Research.sh                  # Pi-hole query research tool
 │   └── wireguard-manager.sh         # VPN client management
@@ -105,6 +108,25 @@ Personal_Contained_Pihole/
     ├── INSTALL.md                   # Installation guide
     ├── AI-CONTEXT.md                # AI assistant context
     └── WIREGUARD-SECURITY.md        # VPN security guide
+```
+
+### Deployed File Locations (on server)
+
+```
+/scripts/Finished/
+├── CONFIG/
+│   ├── lists/                       # Source-of-truth list copies
+│   │   ├── whitelist.txt            # Assembled allowlist
+│   │   ├── regex.list               # Assembled regex patterns
+│   │   └── adlists.list             # Blocklist URLs
+│   ├── encrypt.list                 # Assembled encrypted blocklists
+│   ├── type.conf                    # Server type (full/security/basic)
+│   ├── test.conf                    # Test mode flag
+│   └── dns_type.conf                # DNS resolver type
+├── updates.sh
+├── refresh.sh
+├── Research.sh
+└── wireguard-manager.sh
 ```
 
 ---
@@ -190,7 +212,7 @@ All maintenance scripts are automatically installed to `/scripts/Finished/`:
 ### Update Scripts
 
 ```bash
-# Full update - All lists, scripts, and database
+# Full update - All lists, scripts, and database (default if no command given)
 sudo bash /scripts/Finished/updates.sh full-update
 
 # Purge and rebuild - Clear all lists and rebuild from scratch
@@ -207,7 +229,45 @@ sudo bash /scripts/Finished/updates.sh refresh
 
 # Quick update - Lists only, no scripts
 sudo bash /scripts/Finished/updates.sh quick-update
+
+# Show detailed help
+sudo bash /scripts/Finished/updates.sh help
 ```
+
+### Update Script Options
+
+All commands accept the following flags:
+
+```bash
+# Enable verbose logging
+sudo bash /scripts/Finished/updates.sh full-update --verbose
+
+# Enable debug mode (verbose + error tracking)
+sudo bash /scripts/Finished/updates.sh full-update --debug
+
+# Skip automatic reboot check
+sudo bash /scripts/Finished/updates.sh full-update --no-reboot
+```
+
+### Error Summary & Diagnostics
+
+When running with `--debug`, updates.sh provides a categorized error summary at the end of each run:
+
+- **Download Errors** - Failed file downloads with URLs
+- **GPG Errors** - Decryption failures for encrypted lists
+- **SQL Errors** - Database operation failures
+- **Deploy Errors** - File deployment failures
+
+If errors occur, the summary includes recommended troubleshooting steps.
+
+### GPG Key Auto-Management
+
+During `full-update` and `purge-and-update`, the update script automatically:
+
+- Checks the repository for new GPG public keys
+- Downloads keys from `installer/public-gpg-keys/`
+- Compares fingerprints to avoid duplicate imports
+- Imports new keys as needed
 
 ### Cron Jobs
 
@@ -241,7 +301,7 @@ sudo bash /scripts/Finished/wireguard-manager.sh
 - ✅ Display connection statistics
 - ✅ Restart WireGuard service
 - ✅ Backup all configurations
-- ✅ Show file locations (NEW)
+- ✅ Show file locations
 
 ### VPN Network
 
@@ -348,8 +408,8 @@ sudo rm -rf /etc/wireguard
 # Remove cron jobs
 sudo crontab -r
 
-# Optional: Remove packages
-sudo apt-get remove --purge pihole-FTL unbound wireguard fail2ban
+# Optional: Remove remaining packages
+sudo apt-get remove --purge unbound wireguard fail2ban
 ```
 
 ---
@@ -381,6 +441,19 @@ This project consolidates and enhances multiple Pi-hole deployment tools into a 
 ---
 
 ## Changelog
+
+### Version 2.0.1 (2026-04-04)
+
+- ✅ Pi-hole v6 exclusive support with direct gravity.db SQL transactions
+- ✅ Command-line flags: `--verbose`, `--debug`, `--no-reboot`
+- ✅ `help` command with detailed usage information
+- ✅ Categorized error tracking and summary (download, GPG, SQL, deploy errors)
+- ✅ Automatic GPG public key detection and import from repository
+- ✅ Network connectivity pre-flight checks
+- ✅ Parallel downloads with detailed failure reporting
+- ✅ Lists directory (`/scripts/Finished/CONFIG/lists`) for source-of-truth copies
+- ✅ Migration support for systems installed before LISTS_DIR change
+- ✅ Debug logging with timestamped trace output
 
 ### Version 1.0.0 (2025-12-07)
 
