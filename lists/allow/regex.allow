@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-04-04
+# Last Modified: 2026-05-31
 # Version: 1.0.1
 #
 # Description: 
@@ -30,5 +30,12 @@
 \.rcs\.telephony\.goog$
 \.storage\.live\.com$
 ip[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\.ahcdn\.com$
+
+(^|\.)push\.apple\.com$
+(^|\.)imessage\.apple\.com$
+(^|\.)icloud\.com$
+(^|\.)apple-mapkit\.com$
+(^|\.)ess\.apple\.com$
+
 
 ## end
