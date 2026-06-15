@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-05-31
+# Last Modified: 2026-06-15
 # Version: 1.0.1
 #
 # Description: 
@@ -20,22 +20,23 @@
 #   Updates via: sudo bash /scripts/Finished/updates.sh
 #
 ################################################################################
-\.apple\.com\.akadns\.net$
-\.godaddy\.com\.akadns\.net$
-\.microsoft\.com\.akadns\.net$
+
+(^|\.)apple-mapkit\.com$
+(^|\.)cloudflare\.com$
+(^|\.)ess\.apple\.com$
+(^|\.)icloud\.com$
+(^|\.)imessage\.apple\.com$
+(^|\.)push\.apple\.com$
 [0-9]*\.tlu\.dl\.delivery\.mp\.microsoft\.com$
 [A-Za-z]*[0-9]*-ssl\.ls\.apple\.com$
 \.1drv\.com$
+\.apple\.com\.akadns\.net$
+\.godaddy\.com\.akadns\.net$
 \.jibe\.google\.com$
+\.microsoft\.com\.akadns\.net$
 \.rcs\.telephony\.goog$
 \.storage\.live\.com$
 ip[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\.ahcdn\.com$
-
-(^|\.)push\.apple\.com$
-(^|\.)imessage\.apple\.com$
-(^|\.)icloud\.com$
-(^|\.)apple-mapkit\.com$
-(^|\.)ess\.apple\.com$
 
 
 ## end
