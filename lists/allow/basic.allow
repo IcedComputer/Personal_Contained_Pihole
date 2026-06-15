@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-04-04
+# Last Modified: 2026-06-15
 # Version: 1.0.1
 #
 # Description: 
@@ -28,6 +28,7 @@ api.push.apple.com
 apple.news
 fp-us-tmobile.rcs.telephony.goog
 fp-us-verizon.rcs.telephony.goog
+mobile-data.onetrust.io
 rcs-acs-att-us.jibe.google.com
 rcs-acs-tmobile-us.jibe.google.com
 rcsbusinessmessaging.googleapis.com
