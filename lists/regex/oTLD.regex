@@ -7,7 +7,7 @@
 # 
 # Created: 2023-05-15
 # Organized: 2025-12-07
-# Last Modified: 2026-04-04
+# Last Modified: 2026-07-03
 # Version: 1.0.1
 #
 # Description: 
@@ -135,6 +135,7 @@
 (^|\.)sex$
 (^|\.)shop$
 (^|\.)shouji$
+(^|\.)show$
 (^|\.)sip$
 (^|\.)site$
 (^|\.)social$
@@ -169,6 +170,7 @@
 (^|\.)XN--1CK2E1B$
 (^|\.)XN--1QQW23A$
 (^|\.)XN--2SCRJ9C$
+(^|\.)xn--2scrj9c$
 (^|\.)XN--30RR7Y$
 (^|\.)XN--3BST00M$
 (^|\.)XN--3DS443G$
@@ -300,6 +302,7 @@
 (^|\.)XN--ROVU88B$
 (^|\.)XN--RVC1E0AM3E$
 (^|\.)XN--S9BRJ9C$
+(^|\.)xn--s9brj9c$
 (^|\.)XN--SES554G$
 (^|\.)XN--T60B56A$
 (^|\.)XN--TCKWE$
@@ -314,15 +317,13 @@
 (^|\.)XN--WGBH1C$
 (^|\.)XN--WGBL6A$
 (^|\.)XN--XHQ521B$
+(^|\.)xn--xhq521b$
 (^|\.)XN--XKC2AL3HYE2A$
 (^|\.)XN--XKC2DL3A5EE0H$
 (^|\.)XN--Y9A3AQ$
 (^|\.)XN--YFRO4I67O$
 (^|\.)XN--YGBI2AMMX$
 (^|\.)XN--ZFR164B$
-(^|\.)xn--2scrj9c$
-(^|\.)xn--s9brj9c$
-(^|\.)xn--xhq521b$
 (^|\.)xxx$
 (^|\.)xyz$
 (^|\.)yachts$
