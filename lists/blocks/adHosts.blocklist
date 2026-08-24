@@ -7,7 +7,7 @@
 #
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-04-04
+# Last Modified: 2026-08-24
 # Version: 1.0.1
 #
 # Description:
@@ -20,6 +20,7 @@
 #   Updates via: sudo bash /scripts/Finished/updates.sh
 #
 ################################################################################
+
 
 189229.measurementapi.com
 50analytics.secureserver.net
@@ -198,9 +199,13 @@ imp-lb-us2.jampp.com
 imp2.ads.linkedin.com
 infolink.pavv.co.kr
 integralads.com
+jj2rie-cdn-settings.appsflyersdk.com
+jj2rie-launches.appsflyersdk.com
 kindepend.com
 koi-3qcmwoxuw2.marketingautomation.services
 krg-tracker-production.elasticbeanstalk.com
+l5g27x.cdn-settings.appsflyersdk.com
+l5g27x.launches.appsflyersdk.com
 launch.apple.com
 lcprd1.samsungcloudsolution.net
 lib-ap-1.brilliantcollector.com
@@ -298,6 +303,8 @@ telemetry.servers.getgo.com
 telemetryhost235.cloudapp.net
 time.samsungcloudsolution.com
 tour.eplay.com
+tpr0m7.cdn-settings.appsflyersdk.com
+tpr0m7.dlsdk.appsflyersdk.com
 tr.iadsdk.apple.com
 tr.iadsdk.apple.com
 tracker-sp-elb-1474841806.us-east-1.elb.amazonaws.com
