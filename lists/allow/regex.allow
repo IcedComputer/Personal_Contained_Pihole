@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-06-15
+# Last Modified: 2026-09-20
 # Version: 1.0.1
 #
 # Description: 
@@ -22,8 +22,10 @@
 ################################################################################
 
 (^|\.)apple-mapkit\.com$
+(^|\.)challenges\.cloudflare\.com$
 (^|\.)cloudflare\.com$
 (^|\.)ess\.apple\.com$
+(^|\.)gateway\.fe2\.apple-dns\.net$
 (^|\.)icloud\.com$
 (^|\.)imessage\.apple\.com$
 (^|\.)push\.apple\.com$
@@ -37,6 +39,5 @@
 \.rcs\.telephony\.goog$
 \.storage\.live\.com$
 ip[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\.ahcdn\.com$
-
 
 ## end
