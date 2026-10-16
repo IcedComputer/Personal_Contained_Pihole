@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-07-03
+# Last Modified: 2026-10-15
 # Version: 1.0.1
 #
 # Description: 
@@ -70,6 +70,9 @@
 (^|\.|-)web3000\.com$
 (^|\.|-)webcodez\.com
 (^|\.|-)yandex[-_\.]
+(^|\.|-)mtrtb\.com$
+(^|\.|-)adtimizer\.co$
+(^|\.|-)myweb3id\.io$
 
 ## end
 
