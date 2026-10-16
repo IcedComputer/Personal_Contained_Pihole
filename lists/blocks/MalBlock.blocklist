@@ -1,4 +1,4 @@
-﻿################################################################################
+################################################################################
 # Pi-hole Configuration File
 # File: MalBlock.blocklist
 # Type: Domain Blocklist
@@ -7,7 +7,7 @@
 #
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-08-17
+# Last Modified: 2026-10-15
 # Version: 1.0.1
 #
 # Description:
@@ -21,6 +21,20 @@
 #
 ################################################################################
 
+keyadapter.com
+sharethere.net
+fearevolve.com
+insightenterprisells.com
+jobmarcher.com
+plasticbells.com
+www.controlium.net
+controlium.net
+pqv2.mtrtb.com
+discovertech-alb-100966113.us-east-1.elb.amazonaws.com
+powerium.net
+discovertech.us.auth0.com
+adv45.volasim.com
+adv50.volasim.com
 037008194168.suwalki.vectranet.pl
 037008209142.suwalki.vectranet.pl
 088156042129.olsztyn.vectranet.pl
