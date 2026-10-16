@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-08-24
+# Last Modified: 2026-10-15
 # Version: 1.0.1
 #
 # Description: 
@@ -21,6 +21,9 @@
 #
 ################################################################################
 
+(^|\.|-)mtrtb\.com$
+(^|\.|-)adtimizer\.co$
+(^|\.|-)myweb3id\.io$
 (^|\.)5usakura7s\.co(-8usa)?
 (^|\.)adzerk\.net$
 (^|\.)ibs\.lgappstv\.com
