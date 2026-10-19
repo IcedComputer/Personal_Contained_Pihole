@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-10-15
+# Last Modified: 2026-10-19
 # Version: 1.0.1
 #
 # Description: 
@@ -20,6 +20,7 @@
 #   Updates via: sudo bash /scripts/Finished/updates.sh
 #
 ################################################################################
+
 (^|\.|-)(0+)?apple(s)?0+\.com$
 (^|\.|-)......\.drivefact\.org$
 (^|\.|-)...police\.((com)|(net))$
@@ -32,6 +33,9 @@
 (^|\.|-)8ox\.cn$
 (^|\.|-)[a-z0-9]*keygen(erator)?[-_\.]
 (^|\.|-)adsp\.ruce\.com$
+(^|\.|-)adtimizer\.co$
+(^|\.|-)adtimizer\.com$
+(^|\.|-)akedo\.gg$
 (^|\.|-)amazones\.com$
 (^|\.|-)animeteatr\.ru$
 (^|\.|-)arrowservice\.net$
@@ -40,10 +44,12 @@
 (^|\.|-)avsvmcloud\.com
 (^|\.|-)businessconsults\.net$
 (^|\.|-)chinaunicom[-_\.]
+(^|\.|-)controlium\.net$
 (^|\.|-)creditsansjustificatif\.me$
 (^|\.|-)deftsecurity\.com
 (^|\.|-)dfhdsfhhfdhdf5s6h5\.blogspot[-_\.]
 (^|\.|-)digitalcollege\.org
+(^|\.|-)discover-tech\.io$
 (^|\.|-)elbavietnam\.com$
 (^|\.|-)federalres\.org$
 (^|\.|-)fin((spy)|(fisher))[-_\.]
@@ -52,12 +58,19 @@
 (^|\.|-)fwmrm\.net$
 (^|\.|-)globalnetworkissues\.com
 (^|\.|-)idahoanad\.org$
+(^|\.|-)impchkdsp\.com$
 (^|\.|-)justclick\.ru$
 (^|\.|-)kontrolnaya-rabota\.ru$
 (^|\.|-)kubecloud\.com
 (^|\.|-)lcomputers\.com
+(^|\.|-)mtrtb\.com$
 (^|\.|-)musemuse\.cn$
+(^|\.|-)mydsp\.io$
+(^|\.|-)myipinfo\.io$
+(^|\.|-)myweb3id\.io$
 (^|\.|-)nsogroup[-_\.]
+(^|\.|-)nutralove\.co$
+(^|\.|-)powerium\.net$
 (^|\.|-)releaseyourreturns\.com$
 (^|\.|-)seobundlekit\.com
 (^|\.|-)silverpush[-_\.]
@@ -66,24 +79,12 @@
 (^|\.|-)thedoccloud\.com
 (^|\.|-)tiktok((cdn)|(v))?\.((com)|(org))(\.|-)?
 (^|\.|-)tiktokv\.com[-_\.]?
+(^|\.|-)trakking\.co$
 (^|\.|-)virtualwebdata\.com
+(^|\.|-)volasim\.com$
 (^|\.|-)web3000\.com$
 (^|\.|-)webcodez\.com
 (^|\.|-)yandex[-_\.]
-(^|\.|-)mtrtb\.com$
-(^|\.|-)adtimizer\.co$
-(^|\.|-)myweb3id\.io$
-(^|\.|-)discover-tech\.io$
-(^|\.|-)adtimizer\.co$
-(^|\.|-)volasim\.com$
-(^|\.|-)mydsp\.io$
-(^|\.|-)controlium\.net$
-(^|\.|-)powerium\.net$
-(^|\.|-)myipinfo\.io$
-(^|\.|-)akedo\.gg$
-(^|\.|-)adtimizer\.com$
-(^|\.|-)impchkdsp\.com$
-(^|\.|-)trakking\.co$
-(^|\.|-)nutralove\.co$
+
 ## end
 

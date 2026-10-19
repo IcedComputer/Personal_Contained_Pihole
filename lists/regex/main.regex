@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-10-15
+# Last Modified: 2026-10-19
 # Version: 1.0.1
 #
 # Description: 
@@ -21,34 +21,6 @@
 #
 ################################################################################
 
-(^|\.|-)mtrtb\.com$
-(^|\.|-)adtimizer\.co$
-(^|\.|-)myweb3id\.io$
-(^|\.|-)discover-tech\.io$
-(^|\.|-)adtimizer\.co$
-(^|\.|-)volasim\.com$
-(^|\.|-)mydsp\.io$
-(^|\.|-)controlium\.net$
-(^|\.|-)powerium\.net$
-(^|\.|-)myipinfo\.io$
-(^|\.|-)akedo\.gg$
-(^|\.|-)adtimizer\.com$
-(^|\.|-)impchkdsp\.com$
-(^|\.|-)trakking\.co$
-(^|\.|-)nutralove\.co$
-(^|\.)5usakura7s\.co(-8usa)?
-(^|\.)adzerk\.net$
-(^|\.)ibs\.lgappstv\.com
-(^|\.)lgsmartad\.compihole
-(^|\.)rdx2\.lgtvsdp\.com
-(^|\.)samsung(electronics|cloudcdn)\.com$
-(^|\.)samsungcloudsolution\.(com|net)$
-(^|\.)smartshare\.lgtvsdp\.com
-(^|\.)snapads\.com$
-(^|\.)tplinkra\.com$
-(^|\.)whitetreecollective\.com
-(^|\.)x999xx\.
-(^|\.)xbcs\.net$
 (^|\.|-)((boom)|(dynamo)|(ket)|(max)|(moat)|(pop)|(snap)|(te))ads?[-_\.]
 (^|\.|-)((in)|(kr)|(ks))mobi(le)?\.((com)|(net))$
 (^|\.|-)((moat)|(traking))?pixel[-_\.]
@@ -78,6 +50,7 @@
 (^|\.|-)3lift\.com$
 (^|\.|-)51yes\.com$
 (^|\.|-)54646\.com?$
+(^|\.|-)5usakura7s\.co(-8usa)?
 (^|\.|-)7897121\.com$
 (^|\.|-)8981367\.com$
 (^|\.|-)8ox\.cn$
@@ -108,9 +81,12 @@
 (^|\.|-)adsrv\.rtbsuperhub\.com
 (^|\.|-)adsrvr\.org$
 (^|\.|-)adswizz\.com$
+(^|\.|-)adtimizer\.co$
+(^|\.|-)adtimizer\.com$
 (^|\.|-)adtng\.com(\.)?
 (^|\.|-)adventurefeeds\.com$
 (^|\.|-)adviva\.net$
+(^|\.|-)adzerk\.net$
 (^|\.|-)adzmedia\.com$
 (^|\.|-)aerserv\.com$
 (^|\.|-)aff(iliat(es?|ion))?[-_\.]
@@ -120,6 +96,7 @@
 (^|\.|-)agof\.de$
 (^|\.|-)agora\.io$
 (^|\.|-)ahcdn\.com$
+(^|\.|-)akedo\.gg$
 (^|\.|-)aliyuncs\.com$
 (^|\.|-)alljoyn\.org$
 (^|\.|-)alphonso\.tv$
@@ -220,6 +197,7 @@
 (^|\.|-)content\.ad$
 (^|\.|-)contentabc\.com
 (^|\.|-)contentsquare\.net$
+(^|\.|-)controlium\.net$
 (^|\.|-)convertro\.com$
 (^|\.|-)convio\.net$
 (^|\.|-)conviva\.com$
@@ -254,6 +232,7 @@
 (^|\.|-)digitalmarketing[-_\.]
 (^|\.|-)digitru\.st$
 (^|\.|-)diomedis\.online$
+(^|\.|-)discover-tech\.io$
 (^|\.|-)distiltag\.com$
 (^|\.|-)dmndtrk\.com$
 (^|\.|-)dns-leaks[-_\.]
@@ -350,9 +329,11 @@
 (^|\.|-)hypstarcdn(\.|-)?
 (^|\.|-)i?((ris)|(spotx?))\.tv$
 (^|\.|-)ibm\.xtify\.com$
+(^|\.|-)ibs\.lgappstv\.com
 (^|\.|-)ibyte((dtos)|(img))\.com(\.|-)?
 (^|\.|-)icloud\.com\.akadns\.net
 (^|\.|-)ifood\.tv$
+(^|\.|-)impchkdsp\.com$
 (^|\.|-)impressionmonster\.com$
 (^|\.|-)imprev\.net
 (^|\.|-)imrworldwide\.com
@@ -403,6 +384,7 @@
 (^|\.|-)lever\.com?$
 (^|\.|-)lgappstv\.com$
 (^|\.|-)lgsmartad\.com$
+(^|\.|-)lgsmartad\.compihole
 (^|\.|-)lgtvsdp\.com$
 (^|\.|-)lib-(us|eu)-[0-9]\.brilliantcollector\.com$
 (^|\.|-)liftoff\.io$
@@ -451,13 +433,17 @@
 (^|\.|-)mop((ortals)|(ub))\.com$
 (^|\.|-)mouseflow\.com$
 (^|\.|-)mpression\.net$
+(^|\.|-)mtrtb\.com$
 (^|\.|-)mtvnservices\.com$
 (^|\.|-)muscdn(\.|-)?
 (^|\.|-)musemuse\.cn$
 (^|\.|-)musical\.ly(\.|-)?
 (^|\.|-)mydas\.mobi$
+(^|\.|-)mydsp\.io$
+(^|\.|-)myipinfo\.io$
 (^|\.|-)myqcloud(\.|-)?
 (^|\.|-)myspotlight\.tv$
+(^|\.|-)myweb3id\.io$
 (^|\.|-)naiadsystems?\.com
 (^|\.|-)nativendo\.((com)|(de))$
 (^|\.|-)net-?(dna|dns|doh)(\.|-)?
@@ -470,6 +456,7 @@
 (^|\.|-)nsogroup[-_\.]
 (^|\.|-)nuancemobility\.net$
 (^|\.|-)nuggad\.net$
+(^|\.|-)nutralove\.co$
 (^|\.|-)o5o4o6\.com$
 (^|\.|-)o7jljpik9lqufe7n-m\.com$
 (^|\.|-)oascentral[-_\.]
@@ -509,6 +496,7 @@
 (^|\.|-)polyfill\.io$
 (^|\.|-)poptm\.com$
 (^|\.|-)popupad[-_\.]
+(^|\.|-)powerium\.net$
 (^|\.|-)preisauswahl\.club$
 (^|\.|-)pro-market\.net$
 (^|\.|-)pstatp\.com$
@@ -522,6 +510,7 @@
 (^|\.|-)quasargaming?\.com$
 (^|\.|-)quebec-bin\.com$
 (^|\.|-)rayjump\.com$
+(^|\.|-)rdx2\.lgtvsdp\.com
 (^|\.|-)real-?((prizes)|(lifecams?))[-_\.]
 (^|\.|-)redshell\.io$
 (^|\.|-)releaseyourreturns\.com$
@@ -544,7 +533,9 @@
 (^|\.|-)salecycle\.com$
 (^|\.|-)salemove\.com$
 (^|\.|-)samplicio\.us$
+(^|\.|-)samsung(electronics|cloudcdn)\.com$
 (^|\.|-)samsung(otn|rm)\.net$
+(^|\.|-)samsungcloudsolution\.(com|net)$
 (^|\.|-)scientificrevenue\.com$
 (^|\.|-)scorecardresearch\.com
 (^|\.|-)select-reward\.club$
@@ -566,8 +557,10 @@
 (^|\.|-)sleeknote\.com$
 (^|\.|-)smaato\.net$
 (^|\.|-)smart((asset)|(look))\.com$
+(^|\.|-)smartshare\.lgtvsdp\.com
 (^|\.|-)smartstream(\.|-)
 (^|\.|-)smoozed\.rocks$
+(^|\.|-)snapads\.com$
 (^|\.|-)snssdk\.com(\.|-)?
 (^|\.|-)sociomantic\.com$
 (^|\.|-)soflopxl\.com$
@@ -629,10 +622,12 @@
 (^|\.|-)topt\.rucks?((-autos)|(site))\.((rocks)|(com))$
 (^|\.|-)touchcommerce\.com$
 (^|\.|-)toutiao\.com$
+(^|\.|-)tplinkra\.com$
 (^|\.|-)tradedoubler\.com$
 (^|\.|-)traff(ic)?[-_\.]
 (^|\.|-)traffic((junky)|(stars)|(factory))\.((net)|(com)|(biz))$
 (^|\.|-)traffichaus\.com
+(^|\.|-)trakking\.co$
 (^|\.|-)tremorhub\.com$
 (^|\.|-)triplebyte\.com$
 (^|\.|-)tsyndicate\.com[-_\.]?
@@ -658,6 +653,7 @@
 (^|\.|-)virtualwebdata\.com
 (^|\.|-)visuual\.net$
 (^|\.|-)vizury\.com$
+(^|\.|-)volasim\.com$
 (^|\.|-)volstqkwmth\.com$
 (^|\.|-)voluum(trk)?[0-9]*\.((bid)|(com))$
 (^|\.|-)vosteran\.com$
@@ -667,6 +663,7 @@
 (^|\.|-)webcodez\.com
 (^|\.|-)webrecorder-prod(\.|-)?
 (^|\.|-)webtrekk\.net$
+(^|\.|-)whitetreecollective\.com
 (^|\.|-)wirelessdeveloper\.com$
 (^|\.|-)wishpond\.com$
 (^|\.|-)wistia\.net$
@@ -674,6 +671,8 @@
 (^|\.|-)worldfcdn[-_\.]
 (^|\.|-)wsi\.com$
 (^|\.|-)wzrkt\.com$
+(^|\.|-)x999xx\.
+(^|\.|-)xbcs\.net$
 (^|\.|-)xdates18\.com$
 (^|\.|-)xg4ken\.com$
 (^|\.|-)xiti\.com$
