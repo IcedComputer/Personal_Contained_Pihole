@@ -7,7 +7,7 @@
 # 
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-10-22
+# Last Modified: 2026-10-23
 # Version: 1.0.1
 #
 # Description: 
@@ -72,6 +72,7 @@
 (^|\.|-)adiquity\.com$
 (^|\.|-)adition\.com$
 (^|\.|-)adj\.st$
+(^|\.|-)adnixa\.com$
 (^|\.|-)ado((cean)|(hana)|(tmob))\.((pl)|(com))$
 (^|\.|-)adr((oll)|(ise)|(unnr))[-_\.]
 (^|\.|-)ads?(x|v)?[0-9]*[-_\.]
