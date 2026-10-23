@@ -95,6 +95,7 @@
 (^|\.|-)agkn\.com$
 (^|\.|-)agof\.de$
 (^|\.|-)agora\.io$
+(^|\.|-)ahacdn\.me$
 (^|\.|-)ahcdn\.com$
 (^|\.|-)akedo\.gg$
 (^|\.|-)aliyuncs\.com$
@@ -364,9 +365,11 @@
 (^|\.|-)jmp9\.com$
 (^|\.|-)jsdelivr\.net$
 (^|\.|-)junctiontv\.net$
+(^|\.|-)juneworewyjyna\.com$
 (^|\.|-)jungroup\.com$
 (^|\.|-)juosanf\.com$
 (^|\.|-)justclick\.ru$
+(^|\.|-)justservingfiles\.net$
 (^|\.|-)kaffnet\.com$
 (^|\.|-)kargo\.com$
 (^|\.|-)kik-live\.com$
@@ -508,6 +511,7 @@
 (^|\.|-)puserving\.com$
 (^|\.|-)pushcrew\.com$
 (^|\.|-)pushsissmc\.com$
+(^|\.|-)pxltag\.com$
 (^|\.|-)qlitics\.com$
 (^|\.|-)qualtrics\.com$
 (^|\.|-)quant((count)|(ummetric))\.com$
