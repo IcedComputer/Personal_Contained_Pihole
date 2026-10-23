@@ -7,7 +7,7 @@
 #
 # Created: 2020-07-03
 # Organized: 2025-12-07
-# Last Modified: 2026-10-05
+# Last Modified: 2026-10-22
 # Version: 1.0.1
 #
 # Description:
@@ -20,9 +20,6 @@
 #   Updates via: sudo bash /scripts/Finished/updates.sh
 #
 ################################################################################
-
-e673.dsce9.akamaiedge.net
-api.zynga.com
 
 189229.measurementapi.com
 50analytics.secureserver.net
@@ -97,6 +94,8 @@ amplitude.map.fastly.net
 analytics.snapchat.com
 api-tealeaf.goacoustic.com
 api.amplitude.com
+api.bidmachine.io
+api.zynga.com
 app-analytics-v2.snapchat.com
 app-analytics.snapchat.com
 apple.comscoreresearch.com
@@ -169,6 +168,7 @@ devices.carnivalmobile.com
 diagnostics.meethue.com
 dlt-beacon.dynatrace-managed.com
 dolro.club
+e673.dsce9.akamaiedge.net
 euw.adserver.snapads.com
 events.bouncex.net
 eventtracking.hubapi.com
