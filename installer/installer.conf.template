@@ -153,6 +153,10 @@ WIREGUARD_PORT="51820"
 # SECURITY CONFIGURATION (OPTIONAL)
 # ============================================================================
 
+# SSH and repeat-offender Fail2Ban jails are enabled automatically.
+# The Pi-hole web jail is opt-in: FTL v6.9 access logging requires debug.api=true.
+# See docs/INSTALL.md before enabling it; API debugging adds sensitive diagnostics.
+
 # Enable Multi-Factor Authentication (Google Authenticator) for SSH
 # Options: "yes", "no"
 # Requires running: sudo -u <username> google-authenticator after installation

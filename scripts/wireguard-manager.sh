@@ -3,8 +3,8 @@
 # WireGuard VPN Client Manager
 # File: wireguard-manager.sh
 # Created: 2025-12-07
-# Last Modified: 2025-12-07
-# Version: 1.0.0
+# Last Modified: 2026-11-11
+# Version: 1.1.1
 #
 # Description: User-friendly manager for WireGuard VPN clients
 #              Mimics PiVPN functionality with menu-driven interface
@@ -23,6 +23,9 @@ readonly COLOR_RESET='\033[0m'
 
 # Paths
 readonly WIREGUARD_DIR="/etc/wireguard"
+readonly WIREGUARD_DNS_DIR="/etc/wireguard-dns"
+readonly WIREGUARD_HOSTS="${WIREGUARD_DNS_DIR}/hosts"
+readonly WIREGUARD_DNS_CONFIG="/etc/dnsmasq.d/02-pihole-wireguard.conf"
 CONFIG_FILE="${WIREGUARD_DIR}/wg0.conf"
 CLIENTS_DIR="${WIREGUARD_DIR}/clients"
 
@@ -73,6 +76,144 @@ check_wireguard() {
     if [[ ! -f "${CONFIG_FILE}" ]]; then
         log_error "WireGuard not configured. Run install-pihole-vpn.sh first."
         exit 1
+    fi
+}
+
+prepare_wireguard_dns() {
+    if [[ -L "${WIREGUARD_DNS_DIR}" || -L "${WIREGUARD_HOSTS}" || -L "${WIREGUARD_DNS_CONFIG}" ]]; then
+        log_error "Refusing symlinked WireGuard DNS paths"
+        return 1
+    fi
+    if [[ ! -f "${WIREGUARD_DNS_CONFIG}" ]]; then
+        log_error "Missing WireGuard DNS configuration: ${WIREGUARD_DNS_CONFIG}"
+        return 1
+    fi
+    if ! grep -Fxq "addn-hosts=${WIREGUARD_HOSTS}" "${WIREGUARD_DNS_CONFIG}" &&
+       ! grep -Fxq "addn-hosts=${WIREGUARD_DIR}/hosts" "${WIREGUARD_DNS_CONFIG}"; then
+        log_error "Unexpected addn-hosts configuration; update ${WIREGUARD_DNS_CONFIG} to use ${WIREGUARD_HOSTS}"
+        return 1
+    fi
+
+    # Publish only hostname mappings; keep all key material under the private directory.
+    install -d -o root -g root -m 755 "${WIREGUARD_DNS_DIR}" || return 1
+    if [[ ! -e "${WIREGUARD_HOSTS}" ]]; then
+        if [[ ! -f "${WIREGUARD_DIR}/hosts" || -L "${WIREGUARD_DIR}/hosts" ]]; then
+            log_error "No regular WireGuard hosts file available to migrate"
+            return 1
+        fi
+        install -o root -g root -m 644 "${WIREGUARD_DIR}/hosts" "${WIREGUARD_HOSTS}" || return 1
+        log_success "Copied legacy hostname mappings to ${WIREGUARD_HOSTS}"
+    fi
+    if [[ ! -f "${WIREGUARD_HOSTS}" ]]; then
+        log_error "WireGuard hosts path is not a regular file: ${WIREGUARD_HOSTS}"
+        return 1
+    fi
+    chown root:root "${WIREGUARD_HOSTS}" || return 1
+    chmod 644 "${WIREGUARD_HOSTS}" || return 1
+
+    if grep -Fxq "addn-hosts=${WIREGUARD_DIR}/hosts" "${WIREGUARD_DNS_CONFIG}"; then
+        sed -i "s|^addn-hosts=${WIREGUARD_DIR}/hosts$|addn-hosts=${WIREGUARD_HOSTS}|" "${WIREGUARD_DNS_CONFIG}" || return 1
+        if ! systemctl restart pihole-FTL; then
+            if ! sed -i "s|^addn-hosts=${WIREGUARD_HOSTS}$|addn-hosts=${WIREGUARD_DIR}/hosts|" "${WIREGUARD_DNS_CONFIG}"; then
+                log_error "Could not restore the legacy DNS path after restart failure"
+            fi
+            log_error "FTL restart failed; fix FTL and retry DNS migration"
+            return 1
+        fi
+        log_success "Migrated WireGuard DNS configuration"
+    fi
+}
+
+update_client_hostname() {
+    local name="$1" ip="${2:-}" temp_file
+    if [[ -L "${WIREGUARD_DNS_DIR}" || -L "${WIREGUARD_HOSTS}" || ! -f "${WIREGUARD_HOSTS}" ]]; then
+        log_error "WireGuard hosts file must be a regular file in a non-symlinked DNS directory"
+        return 1
+    fi
+    if ! grep -Fxq "addn-hosts=${WIREGUARD_HOSTS}" "${WIREGUARD_DNS_CONFIG}"; then
+        log_error "DNS configuration does not use ${WIREGUARD_HOSTS}; retry DNS migration first"
+        return 1
+    fi
+    temp_file=$(mktemp "${WIREGUARD_HOSTS}.tmp.XXXXXX") || return 1
+    if ! awk -v name="$name" -v ip="$ip" '
+        NF < 2 || $2 != name { print }
+        END { if (ip != "") print ip, name }
+    ' "${WIREGUARD_HOSTS}" > "$temp_file" ||
+       ! chmod 644 "$temp_file" ||
+       ! mv "$temp_file" "${WIREGUARD_HOSTS}"; then
+        rm -f "$temp_file"
+        log_error "Failed to update WireGuard hostname mappings"
+        return 1
+    fi
+    if ! systemctl restart pihole-FTL; then
+        log_error "Hostname mappings saved, but FTL restart failed"
+        return 1
+    fi
+}
+
+get_client_public_key() {
+    local private_key public_key
+    # A client's [Peer] PublicKey belongs to the server, not to the client.
+    if ! private_key=$(awk '
+        /^[[:space:]]*\[/ { interface = ($0 ~ /^[[:space:]]*\[Interface\][[:space:]]*$/) }
+        interface && /^[[:space:]]*PrivateKey[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*/, "")
+            sub(/[[:space:]]+$/, "")
+            print
+            count++
+        }
+        END { if (count != 1) exit 1 }
+    ' "$1") || [[ -z "$private_key" ]]; then
+        log_error "Cannot read exactly one client private key from $1" >&2
+        return 1
+    fi
+    if ! public_key=$(wg pubkey <<< "$private_key"); then
+        log_error "Failed to derive client public key from $1" >&2
+        return 1
+    fi
+    unset private_key
+    if [[ ! "$public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+        log_error "WireGuard returned an invalid client public key" >&2
+        return 1
+    fi
+    printf '%s\n' "$public_key"
+}
+
+remove_server_peer() {
+    local public_key="$1" temp_file
+    temp_file=$(mktemp "${CONFIG_FILE}.tmp.XXXXXX") || return 1
+    # Buffer complete sections. Blank lines and similar client names are not boundaries.
+    # An absent peer is safe on retry; duplicate keys or read failures must abort.
+    if ! awk -v key="$public_key" '
+        function flush() {
+            if (!drop) printf "%s", block
+            block = ""; drop = 0; peer = 0; pending = 0
+        }
+        /^[[:space:]]*# Client:/ { flush(); pending = 1; block = $0 ORS; next }
+        /^[[:space:]]*\[/ {
+            if (!pending) flush()
+            peer = ($0 ~ /^[[:space:]]*\[Peer\][[:space:]]*$/)
+            pending = 0
+        }
+        {
+            block = block $0 ORS
+            if (peer && $0 ~ /^[[:space:]]*PublicKey[[:space:]]*=/) {
+                value = $0
+                sub(/^[^=]*=[[:space:]]*/, "", value)
+                sub(/[[:space:]]+$/, "", value)
+                if (value == key) { drop = 1; matches++ }
+            }
+        }
+        END { flush(); if (matches > 1) exit 1 }
+    ' "${CONFIG_FILE}" > "$temp_file"; then
+        rm -f "$temp_file"
+        log_error "Cannot safely remove peer: duplicate key or configuration read failure; configuration was not changed"
+        return 1
+    fi
+    if ! mv "$temp_file" "${CONFIG_FILE}"; then
+        rm -f "$temp_file"
+        log_error "Failed to save updated WireGuard configuration"
+        return 1
     fi
 }
 
@@ -128,11 +269,18 @@ add_client() {
 }
 
 manual_add_client() {
-    read -p "Enter client name (alphanumeric only): " client_name
+    read -p "Enter client name (alphanumeric only, max 32 chars): " client_name
     
     # Validate client name
     if [[ ! "${client_name}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
         log_error "Invalid client name. Use only letters, numbers, underscore, and hyphen."
+        sleep 2
+        show_menu
+        return
+    fi
+
+    if (( ${#client_name} > 32 )); then
+        log_error "Invalid client name. Maximum length is 32 characters (got ${#client_name})."
         sleep 2
         show_menu
         return
@@ -148,23 +296,29 @@ manual_add_client() {
     
     log_info "Generating keys for ${client_name}..."
     
-    # Create clients directory if not exists
+    local previous_umask
+    previous_umask=$(umask)
+    # Key-bearing files must be private from creation, not only after chmod.
+    umask 077
     mkdir -p "${CLIENTS_DIR}"
     chmod 700 "${CLIENTS_DIR}"
     
-    # Generate client keys with strong cryptography
-    local private_key=$(wg genkey)
-    local public_key=$(echo "${private_key}" | wg pubkey)
-    local preshared_key=$(wg genpsk)  # Additional layer of security (post-quantum)
+    local private_key public_key preshared_key
+    private_key=$(wg genkey)
+    public_key=$(wg pubkey <<< "${private_key}")
+    preshared_key=$(wg genpsk)  # Additional layer of security (post-quantum)
     
     # Get server info
     local server_public_key
     if [[ -f "${WIREGUARD_DIR}/server-public.key" ]]; then
         server_public_key=$(cat "${WIREGUARD_DIR}/server-public.key")
     else
-        # Extract from config if not in separate file
-        local server_private=$(grep "^PrivateKey" "${CONFIG_FILE}" | awk '{print $3}')
-        server_public_key=$(echo "${server_private}" | wg pubkey)
+        # Extract from config if not in separate file. Same here-string pattern
+        # to keep the server's private key out of process argv.
+        local server_private
+        server_private=$(grep "^PrivateKey" "${CONFIG_FILE}" | awk '{print $3}')
+        server_public_key=$(wg pubkey <<< "${server_private}")
+        unset server_private
     fi
     
     # Get server endpoint (public IP)
@@ -174,18 +328,42 @@ manual_add_client() {
                       curl -s --tlsv1.3 --max-time 5 https://icanhazip.com 2>/dev/null || \
                       curl -s --tlsv1.3 --max-time 5 https://ifconfig.me 2>/dev/null)
     
+    # Validate that the response is actually an IPv4 / IPv6 / DNS hostname.
+    # An external IP-echo service returning attacker-controlled text would
+    # otherwise be embedded verbatim into the client's Endpoint line.
+    local _ip_re='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+    local _v6_re='^[0-9a-fA-F:]+$'
+    local _host_re='^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,253}[a-zA-Z0-9])?$'
+    if [[ -n "${server_endpoint}" ]] \
+        && [[ ! "${server_endpoint}" =~ $_ip_re ]] \
+        && [[ ! "${server_endpoint}" =~ $_v6_re ]] \
+        && [[ ! "${server_endpoint}" =~ $_host_re ]]; then
+        log_warning "Detected endpoint failed validation: '${server_endpoint}'"
+        server_endpoint=""
+    fi
+
     if [[ -z "${server_endpoint}" ]]; then
         log_warning "Could not detect public IP automatically"
         read -p "Enter server public IP or hostname: " server_endpoint
+        # Re-validate user input with the same rules
+        if [[ ! "${server_endpoint}" =~ $_ip_re ]] \
+            && [[ ! "${server_endpoint}" =~ $_v6_re ]] \
+            && [[ ! "${server_endpoint}" =~ $_host_re ]]; then
+            log_error "Invalid endpoint format: '${server_endpoint}'"
+            sleep 2
+            show_menu
+            return
+        fi
     fi
     
     local server_port=$(grep "^ListenPort" "${CONFIG_FILE}" | awk '{print $3}')
     
-    # Get next available IP
+    # Get next available IP. -F (fixed string) prevents the dots in the
+    # network prefix from being interpreted as regex metacharacters.
     local next_ip=2
     
-    while grep -q "${WIREGUARD_SERVER_NETWORK}.${next_ip}/32" "${CONFIG_FILE}"; do
-        ((next_ip++))
+    while grep -qF "${WIREGUARD_SERVER_NETWORK}.${next_ip}/32" "${CONFIG_FILE}"; do
+        ((++next_ip))
         if [[ ${next_ip} -gt 254 ]]; then
             log_error "No available IP addresses in VPN network"
             sleep 2
@@ -198,8 +376,12 @@ manual_add_client() {
     
     log_info "Assigned IP: ${client_ip}/32"
     
-    # Add peer to server config
-    cat >> "${CONFIG_FILE}" <<EOF
+    # Rename a private temporary file to avoid publishing a partial configuration.
+    local _tmp_server
+    _tmp_server=$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")
+    {
+        cat "${CONFIG_FILE}"
+        cat <<EOF
 
 # Client: ${client_name} (Created: $(date --iso-8601=seconds))
 [Peer]
@@ -208,8 +390,11 @@ PresharedKey = ${preshared_key}
 AllowedIPs = ${client_ip}/32
 
 EOF
+    } > "${_tmp_server}"
+    chmod 600 "${_tmp_server}"
+    mv "${_tmp_server}" "${CONFIG_FILE}"
 
-    # Create client config
+    # Create client config (umask 077 above ensures it is created mode 600)
     cat > "${CLIENTS_DIR}/${client_name}.conf" <<EOF
 # WireGuard Client Configuration: ${client_name}
 # Created: $(date --iso-8601=seconds)
@@ -236,8 +421,11 @@ PersistentKeepalive = 25
 EOF
 
     chmod 600 "${CLIENTS_DIR}/${client_name}.conf"
+    umask "$previous_umask"
     
     log_success "Client '${client_name}' created successfully"
+    # Discard shell references once the keys have been written.
+    unset private_key preshared_key
     log_info "Config file: ${CLIENTS_DIR}/${client_name}.conf"
     
     # Restart WireGuard to apply changes
@@ -252,7 +440,7 @@ EOF
     fi
     
     # Verify client was added
-    if wg show wg0 peers | grep -q "${public_key}"; then
+    if wg show wg0 peers | grep -Fx -- "${public_key}" >/dev/null; then
         log_success "Client successfully added to WireGuard"
     else
         log_warning "Client may not have been added correctly, check configuration"
@@ -260,22 +448,8 @@ EOF
     
     # Add hostname to hosts file for DNS resolution
     log_info "Adding hostname to DNS..."
-    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
-        # Remove any existing entry for this client (in case of re-add)
-        sed -i "/[[:space:]]${client_name}$/d" "${WIREGUARD_DIR}/hosts"
-        # Add new entry
-        echo "${client_ip} ${client_name}" >> "${WIREGUARD_DIR}/hosts"
-        log_success "Hostname '${client_name}' added to DNS"
-        
-        # Restart dnsmasq to reload hosts file
-        if systemctl restart pihole-FTL 2>/dev/null || service pihole-FTL restart 2>/dev/null; then
-            log_success "DNS service restarted"
-        else
-            log_warning "Failed to restart DNS service, hostname may not resolve immediately"
-        fi
-    else
-        log_warning "Hosts file not found at ${WIREGUARD_DIR}/hosts"
-    fi
+    update_client_hostname "${client_name}" "${client_ip}" || return 1
+    log_success "Hostname '${client_name}' added to DNS"
     
     # Ask to show QR code
     echo ""
@@ -321,8 +495,13 @@ remove_client() {
 }
 
 manual_remove_client() {
-    # List clients
-    if [[ ! -d "${CLIENTS_DIR}" ]] || [[ -z "$(ls -A ${CLIENTS_DIR})" ]]; then
+    local clients=() conf client_name client_num confirm client_pubkey peers
+    for conf in "${CLIENTS_DIR}"/*.conf; do
+        [[ -f "$conf" ]] || continue
+        client_name="${conf##*/}"
+        clients+=("${client_name%.conf}")
+    done
+    if (( ${#clients[@]} == 0 )); then
         log_warning "No clients found"
         sleep 2
         show_menu
@@ -332,34 +511,31 @@ manual_remove_client() {
     log_info "Available clients:"
     echo ""
     
-    local clients=()
     local i=1
-    for conf in "${CLIENTS_DIR}"/*.conf; do
-        local name=$(basename "${conf}" .conf)
-        echo "  ${i}) ${name}"
-        clients+=("${name}")
-        ((i++))
+    for client_name in "${clients[@]}"; do
+        echo "  ${i}) ${client_name}"
+        ((++i))
     done
     
     echo ""
-    read -p "Enter client number to remove [1-${#clients[@]}] or 0 to cancel: " client_num
+    read -r -p "Enter client number to remove [1-${#clients[@]}] or 0 to cancel: " client_num
     
     if [[ "${client_num}" == "0" ]]; then
         show_menu
         return
     fi
     
-    if [[ ! "${client_num}" =~ ^[0-9]+$ ]] || [[ "${client_num}" -lt 1 ]] || [[ "${client_num}" -gt "${#clients[@]}" ]]; then
+    if [[ ! "${client_num}" =~ ^[1-9][0-9]{0,2}$ ]] || (( client_num > ${#clients[@]} )); then
         log_error "Invalid selection"
         sleep 2
         show_menu
         return
     fi
     
-    local client_name="${clients[$((client_num-1))]}"
+    client_name="${clients[$((client_num-1))]}"
     
     echo ""
-    read -p "Remove client '${client_name}'? This cannot be undone! [y/N]: " confirm
+    read -r -p "Remove client '${client_name}'? This cannot be undone! [y/N]: " confirm
     
     if [[ ! "${confirm,,}" =~ ^(y|yes)$ ]]; then
         log_info "Cancelled"
@@ -368,91 +544,34 @@ manual_remove_client() {
         return
     fi
     
-    # Get client public key
-    local client_pubkey=$(grep "PublicKey" "${CLIENTS_DIR}/${client_name}.conf" | awk '{print $3}')
-    
-    # Remove from server config
-    if [[ -n "${client_pubkey}" ]]; then
-        # Remove peer section from config (improved parsing)
-        local temp_file="${CONFIG_FILE}.tmp.$$"
-        local in_target_peer=false
-        local skip_until_next_section=false
-        
-        while IFS= read -r line; do
-            # Check if this is the client comment line
-            if [[ "${line}" =~ ^#[[:space:]]*Client:[[:space:]]*${client_name} ]]; then
-                skip_until_next_section=true
-                continue
-            fi
-            
-            # Check if we found the peer with matching public key
-            if [[ "${skip_until_next_section}" == true ]] && [[ "${line}" =~ ^PublicKey[[:space:]]*=[[:space:]]*${client_pubkey} ]]; then
-                in_target_peer=true
-                continue
-            fi
-            
-            # Stop skipping when we hit the next section or blank line after the peer
-            if [[ "${skip_until_next_section}" == true ]] && [[ "${line}" =~ ^\[.*\]$ || "${line}" =~ ^#[[:space:]]*Client: || -z "${line}" ]]; then
-                skip_until_next_section=false
-                in_target_peer=false
-            fi
-            
-            # Skip lines that are part of the target peer
-            if [[ "${in_target_peer}" == true || "${skip_until_next_section}" == true ]]; then
-                continue
-            fi
-            
-            # Write all other lines
-            echo "${line}"
-        done < "${CONFIG_FILE}" > "${temp_file}"
-        
-        # Replace original config
-        mv "${temp_file}" "${CONFIG_FILE}"
-        chmod 600 "${CONFIG_FILE}"
+    client_pubkey=$(get_client_public_key "${CLIENTS_DIR}/${client_name}.conf") || return 1
+    if ! peers=$(wg show wg0 peers); then
+        log_error "Cannot inspect live WireGuard peers; no client configuration was changed"
+        return 1
     fi
-    
-    # Remove client config and backup
-    if [[ -f "${CLIENTS_DIR}/${client_name}.conf" ]]; then
-        # Create backup before deletion
-        local backup_dir="${CLIENTS_DIR}/.removed"
-        mkdir -p "${backup_dir}"
-        mv "${CLIENTS_DIR}/${client_name}.conf" "${backup_dir}/${client_name}.conf.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || \
-            rm -f "${CLIENTS_DIR}/${client_name}.conf"
+    remove_server_peer "${client_pubkey}" || return 1
+    # Remove just this peer; restarting the interface would disconnect every client.
+    if ! wg set wg0 peer "${client_pubkey}" remove; then
+        log_error "Peer removed from disk, but live removal failed; restart WireGuard before considering access revoked"
+        return 1
     fi
-    
-    # Restart WireGuard
-    log_info "Restarting WireGuard..."
-    if systemctl restart wg-quick@wg0; then
-        log_success "WireGuard restarted"
-    else
-        log_warning "WireGuard restart failed, trying manual method..."
-        wg-quick down wg0 2>/dev/null || true
-        sleep 1
-        wg-quick up wg0
+    if ! peers=$(wg show wg0 peers); then
+        log_error "Cannot verify live peer removal"
+        return 1
     fi
-    
-    # Verify removal
-    if ! wg show wg0 peers | grep -q "${client_pubkey}"; then
-        log_success "Client '${client_name}' removed successfully"
-    else
-        log_warning "Client may still be active, manual verification needed"
+    if grep -Fxq -- "${client_pubkey}" <<< "$peers"; then
+        log_error "Client is still active; access revocation failed"
+        return 1
     fi
-    
-    # Remove hostname from hosts file
-    log_info "Removing hostname from DNS..."
-    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
-        sed -i "/[[:space:]]${client_name}$/d" "${WIREGUARD_DIR}/hosts"
-        log_success "Hostname '${client_name}' removed from DNS"
-        
-        # Restart dnsmasq to reload hosts file
-        if systemctl restart pihole-FTL 2>/dev/null || service pihole-FTL restart 2>/dev/null; then
-            log_success "DNS service restarted"
-        else
-            log_warning "Failed to restart DNS service"
-        fi
-    else
-        log_warning "Hosts file not found at ${WIREGUARD_DIR}/hosts"
+
+    local backup_dir="${CLIENTS_DIR}/.removed"
+    if ! install -d -m 700 "${backup_dir}" ||
+       ! mv "${CLIENTS_DIR}/${client_name}.conf" "${backup_dir}/${client_name}.conf.$(date +%Y%m%d_%H%M%S)"; then
+        log_error "Access revoked, but client configuration could not be archived"
+        return 1
     fi
+    update_client_hostname "${client_name}" || return 1
+    log_success "Client '${client_name}' removed successfully"
     
     echo ""
     read -p "Press Enter to return to menu..."
@@ -551,7 +670,7 @@ show_client_config() {
         local name=$(basename "${conf}" .conf)
         echo "  ${i}) ${name}"
         clients+=("${name}")
-        ((i++))
+        ((++i))
     done
     
     echo ""
@@ -573,6 +692,7 @@ show_client_config() {
     
     echo ""
     echo "Configuration for '${client_name}':"
+
     echo "════════════════════════════════════════════════════════════════"
     cat "${CLIENTS_DIR}/${client_name}.conf"
     echo "════════════════════════════════════════════════════════════════"
@@ -615,7 +735,7 @@ show_qr_code() {
         local name=$(basename "${conf}" .conf)
         echo "  ${i}) ${name}"
         clients+=("${name}")
-        ((i++))
+        ((++i))
     done
     
     echo ""
@@ -767,7 +887,12 @@ backup_configs() {
     
     log_info "Creating backup at: ${backup_dir}"
     
+    # umask 077 ensures the staging dir, copied files, and final tarball are
+    # all created mode 600/700 (owner-only). The backup contains every
+    # client's PrivateKey/PresharedKey — it must NEVER be world-readable.
+    umask 077
     mkdir -p "${backup_dir}"
+    chmod 700 "${backup_dir}"
     
     # Backup server config
     if [[ -f "${CONFIG_FILE}" ]]; then
@@ -782,16 +907,18 @@ backup_configs() {
     fi
     
     # Backup hosts file
-    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
-        cp "${WIREGUARD_DIR}/hosts" "${backup_dir}/"
+    if [[ -f "${WIREGUARD_HOSTS}" ]]; then
+        cp "${WIREGUARD_HOSTS}" "${backup_dir}/"
         log_success "Backed up hosts file"
     fi
     
-    # Create archive
-    tar -czf "${backup_dir}.tar.gz" -C "$(dirname ${backup_dir})" "$(basename ${backup_dir})"
+    # Create archive (quote dirname/basename arguments defensively)
+    tar -czf "${backup_dir}.tar.gz" -C "$(dirname "${backup_dir}")" "$(basename "${backup_dir}")"
+    chmod 600 "${backup_dir}.tar.gz"
     rm -rf "${backup_dir}"
+    umask 022
     
-    log_success "Backup created: ${backup_dir}.tar.gz"
+    log_success "Backup created: ${backup_dir}.tar.gz (mode 600)"
     
     echo ""
     read -p "Press Enter to return to menu..."
@@ -825,9 +952,10 @@ show_file_locations() {
     echo ""
     
     echo -e "${COLOR_BLUE}DNS/Hostname Resolution:${COLOR_RESET}"
-    echo "  Hosts File:        ${WIREGUARD_DIR}/hosts"
-    if [[ -f "${WIREGUARD_DIR}/hosts" ]]; then
-        local host_count=$(grep -c "^[^#]" "${WIREGUARD_DIR}/hosts" 2>/dev/null || echo "0")
+    echo "  Hosts File:        ${WIREGUARD_HOSTS}"
+    if [[ -f "${WIREGUARD_HOSTS}" ]]; then
+        local host_count
+        host_count=$(awk 'NF && $0 !~ /^#/ { count++ } END { print count+0 }' "${WIREGUARD_HOSTS}")
         echo -e "                     ${COLOR_GREEN}✓ EXISTS (${host_count} entries)${COLOR_RESET}"
     else
         echo -e "                     ${COLOR_RED}✗ MISSING${COLOR_RESET}"
@@ -862,7 +990,7 @@ show_file_locations() {
     echo -e "${COLOR_BLUE}Quick Access Commands:${COLOR_RESET}"
     echo "  View server config:   cat ${CONFIG_FILE}"
     echo "  List client files:    ls -lh ${CLIENTS_DIR}"
-    echo "  View hosts file:      cat ${WIREGUARD_DIR}/hosts"
+    echo "  View hosts file:      cat ${WIREGUARD_HOSTS}"
     echo "  View dnsmasq config:  cat /etc/dnsmasq.d/02-pihole-wireguard.conf"
     echo ""
     
@@ -874,6 +1002,7 @@ show_file_locations() {
 main() {
     check_root
     check_wireguard
+    prepare_wireguard_dns || log_warning "DNS setup failed; VPN management remains available, but hostname updates may fail"
     show_menu
 }
 

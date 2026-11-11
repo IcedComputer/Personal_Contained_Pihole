@@ -63,6 +63,8 @@ readonly GITHUB_RAW_MAIN="${GITHUB_RAW}/main"
 
 # WireGuard paths
 readonly WIREGUARD_DIR="/etc/wireguard"
+readonly WIREGUARD_DNS_DIR="/etc/wireguard-dns"
+readonly WIREGUARD_HOSTS="${WIREGUARD_DNS_DIR}/hosts"
 readonly WIREGUARD_CONFIG="${WIREGUARD_DIR}/wg0.conf"
 readonly CLIENTS_DIR="${WIREGUARD_DIR}/clients"
 readonly WIREGUARD_SERVER_NETWORK="10.7.0"
@@ -857,6 +859,23 @@ install_pihole() {
 # DNS PROVIDER INSTALLATION
 # ============================================================================
 
+configure_pihole_dns() {
+    # Let FTL validate and persist TOML; never bypass a rejected CLI setting.
+    local key value
+    for key in misc.etc_dnsmasq_d dns.upstreams dns.listeningMode; do
+        case "$key" in
+            misc.etc_dnsmasq_d) value=true ;;
+            dns.upstreams) value='["127.0.0.1#5335"]' ;;
+            dns.listeningMode) value=SINGLE ;;
+        esac
+        if ! pihole-FTL --config "$key" "$value"; then
+            log_error "Failed to set $key through FTL; fix the reported error before retrying"
+            return 1
+        fi
+    done
+    log_success "Pi-hole DNS configuration saved through FTL"
+}
+
 install_unbound() {
     log_info "Installing Unbound recursive DNS resolver..."
     
@@ -958,73 +977,8 @@ EOF
         return 1
     fi
     
-    # Configure Pi-hole v6 to use Unbound as upstream DNS
-    # Pi-hole v6 uses pihole.toml instead of /etc/dnsmasq.d/*.conf by default
     log_info "Configuring Pi-hole v6 to use Unbound..."
-    
-    local PIHOLE_TOML="/etc/pihole/pihole.toml"
-    
-    if [[ -f "${PIHOLE_TOML}" ]]; then
-        # Enable loading of /etc/dnsmasq.d/*.conf files (disabled by default in v6)
-        # Use pihole-FTL CLI for reliable config changes
-        log_info "Setting misc.etc_dnsmasq_d = true..."
-        if pihole-FTL --config misc.etc_dnsmasq_d true 2>/dev/null; then
-            log_success "Enabled /etc/dnsmasq.d/ config loading via CLI"
-        else
-            # Fallback to direct file edit if CLI fails
-            log_warning "CLI failed, attempting direct file edit..."
-            sed -i 's/etc_dnsmasq_d *= *false/etc_dnsmasq_d = true/g' "${PIHOLE_TOML}"
-            # If setting doesn't exist, add it
-            if ! grep -q "etc_dnsmasq_d.*=.*true" "${PIHOLE_TOML}"; then
-                # Append to [misc] section or end of file
-                echo -e '\n[misc]\n  etc_dnsmasq_d = true' >> "${PIHOLE_TOML}"
-            fi
-            log_success "Enabled /etc/dnsmasq.d/ config loading in pihole.toml"
-        fi
-        
-        # Set upstream DNS to only use Unbound (removes any default like 8.8.8.8, 8.8.4.4)
-        log_info "Setting dns.upstreams to 127.0.0.1#5335..."
-        if pihole-FTL --config dns.upstreams '["127.0.0.1#5335"]' 2>/dev/null; then
-            log_success "Configured Pi-hole to use Unbound (127.0.0.1#5335) as only upstream DNS via CLI"
-        else
-            # Fallback to direct file edit if CLI fails
-            log_warning "CLI failed, attempting direct file edit..."
-            # Use Python for reliable TOML editing if available, otherwise sed
-            if command -v python3 &>/dev/null; then
-                python3 << 'PYEOF'
-import re
-toml_file = "/etc/pihole/pihole.toml"
-with open(toml_file, 'r') as f:
-    content = f.read()
-# Replace upstreams line
-content = re.sub(r'upstreams\s*=\s*\[.*?\]', 'upstreams = [ "127.0.0.1#5335" ]', content, flags=re.DOTALL)
-with open(toml_file, 'w') as f:
-    f.write(content)
-PYEOF
-                log_success "Configured Pi-hole to use Unbound via Python"
-            else
-                # sed fallback - match the upstreams line
-                sed -i '/^[[:space:]]*upstreams[[:space:]]*=/c\  upstreams = [ "127.0.0.1#5335" ]' "${PIHOLE_TOML}"
-                log_success "Configured Pi-hole to use Unbound via sed"
-            fi
-        fi
-        
-        # Set listeningMode to SINGLE (required for VPN clients to use Pi-hole)
-        # LOCAL only allows queries from local subnet; SINGLE allows all origins on specified interface
-        log_info "Setting dns.listeningMode to SINGLE for VPN support..."
-        if pihole-FTL --config dns.listeningMode SINGLE 2>/dev/null; then
-            log_success "Configured listeningMode = SINGLE via CLI"
-        else
-            # Fallback to direct file edit
-            log_warning "CLI failed, attempting direct file edit..."
-            sed -i 's/listeningMode *= *"LOCAL"/listeningMode = "SINGLE"/g' "${PIHOLE_TOML}"
-            sed -i 's/listeningMode *= *"local"/listeningMode = "SINGLE"/g' "${PIHOLE_TOML}"
-            log_success "Configured listeningMode = SINGLE via sed"
-        fi
-    else
-        log_error "pihole.toml not found at ${PIHOLE_TOML} - Pi-hole v6 may not be installed correctly"
-        return 1
-    fi
+    configure_pihole_dns || return 1
     
     # Create dnsmasq.d directory if it doesn't exist
     mkdir -p /etc/dnsmasq.d
@@ -1037,29 +991,6 @@ edns-packet-max=1232
 EOF
     chmod 644 /etc/dnsmasq.d/51-unbound.conf
     log_success "Created /etc/dnsmasq.d/51-unbound.conf"
-    
-    # Verify the configuration was applied
-    log_info "Verifying Pi-hole configuration..."
-    if grep -q 'etc_dnsmasq_d.*=.*true' "${PIHOLE_TOML}"; then
-        log_success "Verified: etc_dnsmasq_d = true"
-    else
-        log_error "FAILED: etc_dnsmasq_d was not set to true"
-    fi
-    if grep -q '127.0.0.1#5335' "${PIHOLE_TOML}"; then
-        log_success "Verified: upstreams contains 127.0.0.1#5335"
-    else
-        log_error "FAILED: upstreams was not set to 127.0.0.1#5335"
-    fi
-    if grep -qi 'listeningMode.*=.*"SINGLE"' "${PIHOLE_TOML}"; then
-        log_success "Verified: listeningMode = SINGLE"
-    else
-        log_error "FAILED: listeningMode was not set to SINGLE"
-    fi
-    if [[ -f /etc/dnsmasq.d/51-unbound.conf ]]; then
-        log_success "Verified: /etc/dnsmasq.d/51-unbound.conf exists"
-    else
-        log_error "FAILED: /etc/dnsmasq.d/51-unbound.conf was not created"
-    fi
     
     # Final service restarts to ensure all configuration is applied
     log_info "Restarting services to apply all configuration..."
@@ -1325,6 +1256,12 @@ install_wireguard() {
     
     log_success "WireGuard packages installed"
     
+    if [[ -L "${WIREGUARD_DIR}" || -L "${CLIENTS_DIR}" ||
+          -L "${WIREGUARD_CONFIG}" || -L "${WIREGUARD_DIR}/server-public.key" ]]; then
+        log_error "Refusing symlinked WireGuard key/configuration paths"
+        return 1
+    fi
+
     # Create WireGuard directory structure
     mkdir -p "${WIREGUARD_DIR}"
     mkdir -p "${CLIENTS_DIR}"
@@ -1333,8 +1270,9 @@ install_wireguard() {
     
     # Generate server keys
     log_info "Generating WireGuard server keys..."
-    local server_private_key=$(wg genkey)
-    local server_public_key=$(echo "${server_private_key}" | wg pubkey)
+    local server_private_key server_public_key
+    server_private_key=$(wg genkey) || return 1
+    server_public_key=$(wg pubkey <<< "${server_private_key}") || return 1
     
     # Determine server network interface
     local server_interface=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++)if($i~/dev/)print $(i+1)}')
@@ -1342,7 +1280,7 @@ install_wireguard() {
     # Create server configuration
     log_info "Creating WireGuard server configuration..."
     
-    cat > "${WIREGUARD_CONFIG}" <<EOF
+    (umask 077; cat > "${WIREGUARD_CONFIG}" <<EOF
 # WireGuard Server Configuration
 # Created: $(date --iso-8601=seconds)
 # Server Public Key: ${server_public_key}
@@ -1368,6 +1306,8 @@ PostDown = iptables -D FORWARD -i %i -o %i -j REJECT --reject-with icmp-admin-pr
 
 # Clients added below:
 EOF
+    ) || { log_error "Failed to write WireGuard server configuration"; return 1; }
+    unset server_private_key
 
     chmod 600 "${WIREGUARD_CONFIG}"
     
@@ -1421,14 +1361,19 @@ interface=wg0
 no-dhcp-interface=wg0
 
 # Host file for VPN client hostname resolution
-addn-hosts=${WIREGUARD_DIR}/hosts
+addn-hosts=${WIREGUARD_HOSTS}
 EOF
     chmod 644 /etc/dnsmasq.d/02-pihole-wireguard.conf
     log_success "DNS configuration created for VPN clients"
     
     # Create initial hosts file for WireGuard clients
     log_info "Creating WireGuard hosts file..."
-    cat > "${WIREGUARD_DIR}/hosts" <<EOF
+    if [[ -L "${WIREGUARD_DNS_DIR}" || -L "${WIREGUARD_HOSTS}" ]]; then
+        log_error "Refusing symlinked WireGuard DNS paths"
+        return 1
+    fi
+    install -d -o root -g root -m 755 "${WIREGUARD_DNS_DIR}" || return 1
+    if ! cat > "${WIREGUARD_HOSTS}" <<EOF
 # WireGuard VPN Client Hostnames
 # Created: $(date --iso-8601=seconds)
 # This file is automatically updated by wireguard-manager.sh
@@ -1437,7 +1382,12 @@ EOF
 # Server
 ${WIREGUARD_SERVER_IP} wg-server
 EOF
-    chmod 644 "${WIREGUARD_DIR}/hosts"
+    then
+        log_error "Failed to write WireGuard hostname mappings"
+        return 1
+    fi
+    chown root:root "${WIREGUARD_HOSTS}" || return 1
+    chmod 644 "${WIREGUARD_HOSTS}" || return 1
     log_success "WireGuard hosts file created"
     
     # Restart DNS services to apply dnsmasq config
@@ -1515,9 +1465,9 @@ setup_fail2ban() {
     cat > /etc/fail2ban/jail.local << 'EOF'
 [DEFAULT]
 # Ban settings
-bantime  = 1500        # 25 minutes (1500 seconds)
-maxretry = 3           # 3 attempts before initial ban
-findtime = 86400       # 24 hour window for attempts
+bantime = 1500
+maxretry = 3
+findtime = 86400
 
 # Email alerts (configure if desired)
 destemail = root@localhost
@@ -1531,12 +1481,13 @@ port = ssh
 logpath = %(sshd_log)s
 backend = %(sshd_backend)s
 
-# Pi-hole admin protection
+# Opt-in: FTL access entries require debug.api=true. See docs/INSTALL.md.
 [pihole]
-enabled = true
+enabled = false
 port = http,https
 filter = pihole
-logpath = /var/log/pihole.log
+backend = auto
+logpath = /var/log/pihole/webserver.log
 maxretry = 3
 
 # Recidivist jail - 7 day ban after 3 short bans in 90 days
@@ -1544,9 +1495,9 @@ maxretry = 3
 enabled = true
 filter = recidive
 logpath = /var/log/fail2ban.log
-bantime = 604800       # 7 days
-findtime = 7776000     # 90 day window
-maxretry = 3           # After 3 short bans
+bantime = 604800
+findtime = 7776000
+maxretry = 3
 action = %(action_mwl)s
 
 # Permanent ban jail - forever after 2 recidive bans in 1 year
@@ -1554,9 +1505,9 @@ action = %(action_mwl)s
 enabled = true
 filter = recidive-permanent
 logpath = /var/log/fail2ban.log
-bantime = -1           # Permanent ban (-1 = forever)
-findtime = 31536000    # 1 year window
-maxretry = 2           # After 2 recidive bans
+bantime = -1
+findtime = 31536000
+maxretry = 2
 action = %(action_mwl)s
 EOF
     log_success "Generated Fail2Ban jail configuration"
@@ -1564,27 +1515,36 @@ EOF
     # Create Pi-hole filter
     cat > /etc/fail2ban/filter.d/pihole.conf << 'EOF'
 [Definition]
-failregex = ^.* "(GET|POST|HEAD).* HTTP.*" 401 .*$
-            ^.* "(GET|POST|HEAD).* HTTP.*" 403 .*$
+# Only failed login POSTs, not ordinary unauthenticated polling or ACL denials.
+failregex = ^\[[^\]]+\] ACCESS: <HOST> - \S+ \[[^\]]+\] "POST /(?:admin/)?api/auth(?:\?[^"\s]*)? HTTP/[0-9.]+" 401(?:\s|$)
 ignoreregex =
 EOF
     log_success "Generated Pi-hole Fail2Ban filter"
+    log_warning "Pi-hole web jail is disabled: opt-in requires FTL API debug/access logging; SSH protection remains enabled"
     
     # Create recidive-permanent filter (tracks recidive bans)
     cat > /etc/fail2ban/filter.d/recidive-permanent.conf << 'EOF'
+[INCLUDES]
+before = common.conf
+
 [Definition]
-failregex = ^%(__prefix_line)s\[recidive\] Ban <HOST>$
+_daemon = fail2ban\.actions\s*
+failregex = ^%(__prefix_line)sNOTICE\s+\[recidive\]\s+Ban <HOST>\s*$
 ignoreregex =
 EOF
     log_success "Generated recidive-permanent Fail2Ban filter"
     
-    # Restart Fail2Ban to apply configuration
-    systemctl enable fail2ban
+    if ! fail2ban-client -t; then
+        log_error "Fail2Ban configuration validation failed; service was not restarted"
+        return 1
+    fi
+    systemctl enable fail2ban || return 1
     if systemctl restart fail2ban; then
         log_success "Fail2Ban started with progressive banning"
         log_info "Ban progression: 3 attempts/24h → 25 min | 3 bans/90d → 7 days | 2 recidive/1y → permanent"
     else
         log_error "Failed to restart Fail2Ban"
+        return 1
     fi
 }
 
