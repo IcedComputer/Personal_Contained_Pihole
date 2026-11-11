@@ -4,7 +4,7 @@
 # File: ssh-yubikey.sh
 # Created: 2026-11-11
 # Last Modified: 2026-11-11
-# Version: 1.1.0
+# Version: 1.1.1
 #
 # Description: Standalone FIDO2 SSH setup for Ubuntu Server and Raspberry Pi OS
 #              Installs OpenSSH and generates client enrollment instructions
@@ -27,6 +27,7 @@
 #   disable-enforcement   Restore the saved additive authentication policy
 #
 # Examples:
+#   bash ssh-yubikey.sh setup
 #   sudo bash ssh-yubikey.sh setup
 #   sudo bash ssh-yubikey.sh setup --user azureuser
 #   bash ssh-yubikey.sh configure --host vm.example.com
@@ -68,8 +69,8 @@ Usage: bash ssh-yubikey.sh COMMAND [OPTIONS]
 
 Commands:
   setup                 ROOT: install OpenSSH and prepare a user's SSH access.
-                        Uses the non-root sudo caller unless --user is supplied.
-                        Prompts for the target account when run directly as root.
+                        Uses your existing account, including when invoked with sudo.
+                        Requests sudo automatically if installation needs elevation.
   configure             USER: save the server address and enrollment instructions.
                         Prompts for --host when omitted in an interactive shell.
   enroll                USER: register one client-generated FIDO2 public key.
@@ -80,7 +81,8 @@ Commands:
   disable-enforcement   ROOT: restore --user USER's saved additive policy.
 
 Options:
-  --user USER           Target non-root SSH account for administrator commands.
+  --user USER           Optional target SSH account for administrator commands.
+                        Defaults to the original sudo caller or current account.
                         User commands default to, and can only manage, their own account.
   --host HOST           Public Azure DNS/IP or reachable Pi DNS/IP (configure only).
   --port PORT           Client-facing port (configure only; default: detected port).
@@ -88,8 +90,9 @@ Options:
   --confirm-tested      Confirm a NEW key-only session and console recovery are tested.
   -h, --help            Show help.
 
-Administrator: sudo bash ssh-yubikey.sh setup --user azureuser
-Then, logged in as azureuser (WITHOUT sudo):
+Using your existing account (no second account is needed):
+  sudo bash ssh-yubikey.sh setup
+Then, in that same account's shell (WITHOUT adding sudo):
   bash ssh-yubikey.sh configure --host vm.example.com
   bash ssh-yubikey.sh enroll --public-key ~/yubikey.pub
 
@@ -454,6 +457,10 @@ setup() {
     install_server
     check_paths
     check_server
+    log_info "Preparing SSH for '${TARGET_USER}' (UID $(id -u "$TARGET_USER")); installation runs as root."
+    if [[ "$(id -u "$TARGET_USER")" == "0" && "$(setting permitrootlogin)" == "no" ]]; then
+        log_warning "Existing PermitRootLogin no still blocks root SSH. This script does not change that policy."
+    fi
     install -d -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" -m 700 "$USER_DIR"
     if [[ -f "$LEGACY_KEYS_FILE" ]]; then
         # Drop privileges before touching files in the user's writable directory.
@@ -494,7 +501,7 @@ setup() {
         mv -- "$LEGACY_KEYS_FILE" "${BACKUP}/legacy.keys"
     fi
     save_server_info
-    log_success "Server prepared for ${TARGET_USER}. Now log in as that user, WITHOUT sudo, and run:"
+    log_success "Server prepared for ${TARGET_USER}. In that account's shell, WITHOUT adding sudo, run:"
     printf '  bash ssh-yubikey.sh configure\n'
 }
 
@@ -573,21 +580,32 @@ select_target_user() {
             TARGET_USER="$caller"
             ;;
     esac
-    if [[ -z "$TARGET_USER" && "$command" == "setup" ]]; then
-        if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    if [[ -z "$TARGET_USER" ]]; then
+        if [[ -n "${SUDO_UID:-}" ]]; then
+            [[ "$SUDO_UID" =~ ^[0-9]+$ ]] || die "Invalid SUDO_UID; specify --user USER explicitly."
+            TARGET_USER=$(id -un -- "$SUDO_UID") ||
+                die "Cannot resolve the sudo caller; specify --user USER explicitly."
+        elif [[ -n "${SUDO_USER:-}" ]]; then
             TARGET_USER="$SUDO_USER"
-            log_info "Using sudo caller '${TARGET_USER}' as the SSH account; override with --user USER."
         else
-            prompt_setup_value "Existing non-root SSH account to configure: " "--user USER" TARGET_USER
+            TARGET_USER=$(id -un)
         fi
+        log_info "Using existing SSH account '${TARGET_USER}'; override with --user USER."
     fi
-    [[ -n "$TARGET_USER" ]] ||
-        die "--user USER is required. Run the script as root/sudo, but specify the non-root SSH login to configure."
-    [[ "$TARGET_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$TARGET_USER" != "root" ]] ||
-        die "--user must be a non-root SSH login (for example, azureuser), not the installer account. The script itself must run as root/sudo."
-    id "$TARGET_USER" >/dev/null 2>&1 || die "Account does not exist: ${TARGET_USER}"
-    [[ "$(id -u "$TARGET_USER")" != "0" ]] ||
-        die "The SSH account selected by --user must not have UID 0. Keep running the installer as root/sudo."
+    [[ "$TARGET_USER" =~ ^[A-Za-z_][A-Za-z0-9_.-]*[$]?$ ]] ||
+        die "Unsupported SSH account name '${TARGET_USER}': it must be safe in SSH Match rules and file paths."
+    id -- "$TARGET_USER" >/dev/null 2>&1 || die "Account does not exist: ${TARGET_USER}"
+}
+
+elevate_setup() {
+    local script caller
+    [[ "$EUID" -eq 0 ]] && return
+    command -v sudo >/dev/null || die "Setup needs root privileges. Run this command through sudo or a root shell."
+    caller=$(id -un)
+    script=$(readlink -f -- "${BASH_SOURCE[0]}")
+    [[ -f "$script" ]] || die "Download the script to a file before running setup."
+    log_info "Requesting sudo for installation; keeping '${TARGET_USER:-$caller}' as the SSH account."
+    exec sudo -- bash "$script" "$@" --user "${TARGET_USER:-$caller}"
 }
 
 check_command_role() {
@@ -597,13 +615,17 @@ check_command_role() {
             [[ "$uid" -eq 0 ]] || die "${command} requires root privileges; run with sudo."
             ;;
         configure|enroll|info)
-            [[ "$uid" -ne 0 ]] || die "Run ${command} as your regular SSH user WITHOUT sudo. Only setup and enforcement require root."
+            if [[ "$uid" -eq 0 &&
+                  ( "${SUDO_UID:-0}" != "0" || "${SUDO_USER:-root}" != "root" ) ]]; then
+                die "Run ${command} in your own SSH account's shell WITHOUT sudo. Sudo is needed only for setup and enforcement."
+            fi
             ;;
     esac
 }
 
 main() {
     local command="${1:-}"
+    local original_args=("$@")
     [[ -n "$command" ]] || { usage; exit 1; }
     shift
     case "$command" in
@@ -627,10 +649,13 @@ main() {
             *) die "Unknown option: $1" ;;
         esac
     done
+    if [[ "$command" == "setup" ]]; then
+        elevate_setup "${original_args[@]}"
+    fi
     check_command_role "$command" "$EUID"
     select_target_user "$command"
     [[ "$command" == "configure" || ( -z "$SERVER_HOST" && -z "$SERVER_PORT" ) ]] ||
-        die "--host and --port belong to configure, run as your regular user after root setup."
+        die "--host and --port belong to configure, run in your own account's shell after setup."
     [[ "$command" == "enroll" || -z "$PUBLIC_KEY" ]] || die "--public-key is enroll-only."
     [[ "$command" != "enroll" || -n "$PUBLIC_KEY" ]] || die "enroll requires --public-key FILE."
     [[ "$command" == "enforce" || "$CONFIRM_TESTED" == "0" ]] || die "--confirm-tested is enforce-only."
