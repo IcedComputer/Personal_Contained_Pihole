@@ -3,8 +3,8 @@
 # Pi-hole Update Manager
 # File: updates.sh
 # Created: 2020-07-25
-# Last Modified: 2026-04-04
-# Version: 2.0.1
+# Last Modified: 2026-11-11
+# Version: 2.1.1
 #
 # Description: Automated update manager for Pi-hole configurations
 #              Downloads and deploys adlists, regex rules, allow/block lists
@@ -153,13 +153,15 @@ check_gpg_keys() {
         return 1
     fi
     
-    local key_count=$(gpg --list-keys 2>/dev/null | grep -c "^pub" || echo "0")
-    debug_log "GPG public keys available: $key_count"
+    local key_count
+    key_count=$(gpg --list-keys 2>/dev/null | grep -c "^pub" || true)
+    debug_log "GPG public keys available: ${key_count:-0}"
     
-    local secret_key_count=$(gpg --list-secret-keys 2>/dev/null | grep -c "^sec" || echo "0")
-    debug_log "GPG secret keys available: $secret_key_count"
+    local secret_key_count
+    secret_key_count=$(gpg --list-secret-keys 2>/dev/null | grep -c "^sec" || true)
+    debug_log "GPG secret keys available: ${secret_key_count:-0}"
     
-    if [[ "$secret_key_count" -eq 0 ]]; then
+    if [[ "${secret_key_count:-0}" -eq 0 ]]; then
         log "WARNING: No GPG secret keys found"
         log "WARNING: Encrypted file decryption will fail"
         log "WARNING: Import your private key with: gpg --import /path/to/private.key"
@@ -218,7 +220,7 @@ check_and_import_new_keys() {
             
             if [[ -z "$new_fingerprint" ]]; then
                 log_warning "Could not extract fingerprint from $key_file"
-                ((failed_count++))
+                ((++failed_count))
                 continue
             fi
             
@@ -227,15 +229,15 @@ check_and_import_new_keys() {
             # Check if already imported
             if echo "$current_fingerprints" | grep -q "$new_fingerprint"; then
                 debug_log "Key already imported: $key_file"
-                ((skipped_count++))
+                ((++skipped_count))
             else
                 # Import new key
                 if gpg --import "$cache_path" 2>&1 | tee -a "$LOGFILE" >/dev/null; then
                     log_success "Imported new key: $key_file"
-                    ((imported_count++))
+                    ((++imported_count))
                 else
                     log_error "Failed to import: $key_file"
-                    ((failed_count++))
+                    ((++failed_count))
                 fi
             fi
         else
@@ -356,7 +358,8 @@ download_file() {
     debug_log "Starting download: $url"
     debug_log "Output destination: $output"
     
-    for i in $(seq 1 $retries); do
+    local i
+    for (( i = 1; i <= retries; i++ )); do
         debug_log "Download attempt $i of $retries for: $url"
         
         if curl --tlsv1.3 --fail --location --connect-timeout 10 --max-time 60 \
@@ -474,7 +477,7 @@ parallel_download() {
             IFS='|' read -r failed_url failed_output <<< "${pid_urls[$pid]}"
             log_error "Download failed for URL: $failed_url"
             log_error "Expected output: $failed_output"
-            ((failed++))
+            ((++failed))
         fi
     done
     
@@ -492,6 +495,189 @@ parallel_download() {
 #======================================================================================
 # DATABASE UPDATE FUNCTIONS - PI-HOLE VERSION 6
 #======================================================================================
+
+# Bulk-load a CSV file into a SQLite table via the .import dot-command.
+# Avoids string interpolation of untrusted values into SQL statements.
+#
+# Arguments:
+#   $1 csv_file   Path to RFC 4180 CSV file (caller is responsible for quoting:
+#                 wrap each field in double quotes and double-up embedded quotes)
+#   $2 target     Destination table name (must be a trusted identifier)
+#   $3 columns    Column list, e.g. "type, domain, enabled"
+#   $4 temp_def   Temp staging table column definitions,
+#                 e.g. "type INTEGER, domain TEXT, enabled INTEGER"
+#   $5 label      Human-readable label used in error messages
+#   $6 mode       Optional: "ignore" (default) -> INSERT OR IGNORE,
+#                            "replace"          -> INSERT OR REPLACE,
+#                            "plain"            -> INSERT
+#
+# Returns 0 on success, 1 on failure. Removes its own scratch SQL/err files.
+_sqlite_csv_import() {
+    local csv_file="$1"
+    local target="$2"
+    local cols="$3"
+    local temp_def="$4"
+    local label="$5"
+    local mode="${6:-ignore}"
+    local insert_kw="INSERT OR IGNORE"
+
+    case "$mode" in
+        ignore)  insert_kw="INSERT OR IGNORE" ;;
+        replace) insert_kw="INSERT OR REPLACE" ;;
+        plain)   insert_kw="INSERT" ;;
+        *)
+            log "ERROR: _sqlite_csv_import: unknown mode '$mode'"
+            return 1
+            ;;
+    esac
+
+    if [[ ! -s "$csv_file" ]]; then
+        debug_log "_sqlite_csv_import: CSV file is empty or missing: $csv_file"
+        return 0
+    fi
+
+    # Reject embedded single quotes in the path so the .import directive cannot
+    # be broken out of. Temp paths under $TEMPDIR should never contain them.
+    if [[ "$csv_file" == *\'* ]]; then
+        log "ERROR: _sqlite_csv_import: refusing CSV path containing single quote: $csv_file"
+        return 1
+    fi
+
+    local sql_file="${csv_file%.csv}.sql"
+    local sql_error="${csv_file%.csv}.err"
+
+    {
+        printf 'CREATE TEMP TABLE _import_stage (%s);\n' "$temp_def"
+        printf '.mode csv\n'
+        printf ".import '%s' _import_stage\n" "$csv_file"
+        printf 'BEGIN TRANSACTION;\n'
+        printf '%s INTO %s (%s) SELECT %s FROM _import_stage;\n' \
+            "$insert_kw" "$target" "$cols" "$cols"
+        printf 'COMMIT;\n'
+    } > "$sql_file"
+    if ! sqlite3 "$GRAVITY_DB" < "$sql_file" 2>"$sql_error"; then
+        log "ERROR: Failed bulk-import for $label"
+        [[ -s "$sql_error" ]] && log "ERROR: SQL error: $(cat "$sql_error")"
+        rm -f "$sql_file" "$sql_error"
+        return 1
+    fi
+
+    rm -f "$sql_file" "$sql_error"
+    return 0
+}
+
+# Append one CSV row to $1, quoting every remaining argument per RFC 4180.
+# Embedded double-quotes are doubled; commas and newlines inside fields are
+# preserved safely because each field is wrapped in "...".
+_csv_append_row() {
+    local file="$1"; shift
+    local out="" v escaped first=1
+    for v in "$@"; do
+        escaped="${v//\"/\"\"}"
+        if (( first )); then
+            out="\"$escaped\""
+            first=0
+        else
+            out+=",\"$escaped\""
+        fi
+    done
+    printf '%s\n' "$out" >> "$file"
+}
+
+# Fast path: stream every non-empty line of $1 into CSV $2 with a constant
+# integer prefix and suffix column, e.g. produces:  "<prefix>","<line>","<suffix>"
+# Uses a single awk pass instead of a bash while-read loop, which is dramatically
+# faster on large lists. Security: line content is data inside RFC 4180 quoting,
+# never SQL — embedded quotes are doubled, commas/newlines stay inside the field.
+_csv_stage_constcols() {
+    local in_file="$1" out_file="$2" prefix="$3" suffix="$4"
+    [[ ! -s "$in_file" ]] && { : > "$out_file"; return 0; }
+    awk -v p="$prefix" -v s="$suffix" '
+        length($0) == 0 { next }
+        {
+            v = $0
+            gsub(/"/, "\"\"", v)
+            print "\"" p "\",\"" v "\",\"" s "\""
+        }
+    ' "$in_file" > "$out_file"
+}
+
+# Fast path for adlists: each input line becomes "<id>","<line>","<suffix>"
+# id is sequential starting at 1 (matches original behavior of resetting ids
+# after DELETE FROM adlist).
+_csv_stage_adlist() {
+    local in_file="$1" out_file="$2" suffix="$3"
+    [[ ! -s "$in_file" ]] && { : > "$out_file"; return 0; }
+    awk -v s="$suffix" '
+        length($0) == 0 { next }
+        {
+            v = $0
+            gsub(/"/, "\"\"", v)
+            id++
+            print "\"" id "\",\"" v "\",\"" s "\""
+        }
+    ' "$in_file" > "$out_file"
+}
+
+# Fast path for adlists: each input line becomes "<line>","<suffix>"
+_csv_stage_singlecol() {
+    local in_file="$1" out_file="$2" suffix="$3"
+    [[ ! -s "$in_file" ]] && { : > "$out_file"; return 0; }
+    awk -v s="$suffix" '
+        length($0) == 0 { next }
+        {
+            v = $0
+            gsub(/"/, "\"\"", v)
+            print "\"" v "\",\"" s "\""
+        }
+    ' "$in_file" > "$out_file"
+}
+
+# Filter helper: matches the original `grep -v '#' | grep -v '^$' |
+# grep -v '^[[:space:]]*$' | sort -u -f` pipeline exactly:
+#   - drops any line containing '#' anywhere (not just leading)
+#   - drops empty / whitespace-only lines
+#   - sorts unique, case-insensitive
+_filter_and_sort() {
+    local in_file="$1" out_file="$2"
+    awk '
+        /#/ { next }
+        /^[[:space:]]*$/ { next }
+        { print }
+    ' "$in_file" 2>/dev/null | sort -u -f > "$out_file"
+}
+
+# Concatenate every file in $1 (a directory, maxdepth 1) matching $2 (a glob)
+# into $3, optionally excluding glob $4. Equivalent to:
+#   while read -d '' f; do cat "$f" >> "$3"; done < <(find ... -print0)
+# but uses one `find -exec cat {} +` instead of one fork per file.
+# In DEBUG mode, falls back to the per-file loop so the existing
+# "Processing: <file>" debug lines are preserved. Output ordering after
+# `sort -u -f` is identical either way.
+_concat_matching() {
+    local dir="$1" glob="$2" out="$3" exclude_glob="${4:-}"
+    : > "$out"
+    if (( DEBUG )); then
+        local file
+        while IFS= read -r -d '' file; do
+            if [[ -n "$exclude_glob" && "$file" == $exclude_glob ]]; then
+                continue
+            fi
+            if [[ -f "$file" && -s "$file" ]]; then
+                debug_log "_concat_matching: Processing: $file"
+                cat "$file" >> "$out" 2>/dev/null
+            fi
+        done < <(find "$dir" -maxdepth 1 -name "$glob" -print0 2>/dev/null)
+    else
+        if [[ -n "$exclude_glob" ]]; then
+            find "$dir" -maxdepth 1 -name "$glob" ! -name "${exclude_glob##*/}" \
+                -exec cat {} + >> "$out" 2>/dev/null || true
+        else
+            find "$dir" -maxdepth 1 -name "$glob" \
+                -exec cat {} + >> "$out" 2>/dev/null || true
+        fi
+    fi
+}
 
 update_allow_regex_v6() {
     local file="$TEMPDIR/final.allow.regex.temp"
@@ -517,35 +703,39 @@ update_allow_regex_v6() {
     print_banner green "Starting Allow Regex List (v6)"
     
     local count=0
-    local temp_sql="$TEMPDIR/allow_regex_insert.sql"
-    debug_log "update_allow_regex_v6: Creating SQL file: $temp_sql"
+    local csv_file="$TEMPDIR/allow_regex_insert.$$.csv"
+    debug_log "update_allow_regex_v6: Staging CSV file: $csv_file"
     
-    echo "BEGIN TRANSACTION;" > "$temp_sql"
-    
-    while IFS= read -r pattern; do
-        [[ -z "$pattern" ]] && continue
-        # Type 2 = regex whitelist, enabled = 1
-        local escaped_pattern="${pattern//\'/\'\'}"
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (2, '${escaped_pattern}', 1);" >> "$temp_sql"
-        ((count++))
-        verbose_log "Queued allow regex: $pattern"
-    done < "$file"
-    
-    debug_log "update_allow_regex_v6: Queued $count regex patterns"
-    echo "COMMIT;" >> "$temp_sql"
-    
-    debug_log "update_allow_regex_v6: Executing SQL transaction"
-    local sql_error="$TEMPDIR/sql_error_regex_$$.log"
-    if ! sqlite3 "$GRAVITY_DB" < "$temp_sql" 2>"$sql_error"; then
-        log "ERROR: Failed to insert allow regex"
-        if [[ -f "$sql_error" ]]; then
-            log "ERROR: SQL error: $(cat "$sql_error")"
-            rm -f "$sql_error"
-        fi
-        return 1
+    # Type 2 = regex whitelist, enabled = 1. Use awk fast-path; fall back to
+    # the bash loop only when verbose logging needs per-line emission.
+    if (( VERBOSE )); then
+        : > "$csv_file"
+        while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+            [[ -z "$pattern" ]] && continue
+            _csv_append_row "$csv_file" "2" "$pattern" "1"
+            ((++count))
+            verbose_log "Queued allow regex: $pattern"
+        done < "$file"
+    else
+        _csv_stage_constcols "$file" "$csv_file" "2" "1"
+        count=$(wc -l < "$csv_file" 2>/dev/null | tr -d ' ')
+        count=${count:-0}
     fi
     
-    rm -f "$temp_sql" "$sql_error"
+    debug_log "update_allow_regex_v6: Queued $count regex patterns"
+    
+    if (( count > 0 )); then
+        debug_log "update_allow_regex_v6: Executing CSV import"
+        if ! _sqlite_csv_import "$csv_file" "domainlist" \
+                "type, domain, enabled" \
+                "type INTEGER, domain TEXT, enabled INTEGER" \
+                "allow regex"; then
+            rm -f "$csv_file"
+            return 1
+        fi
+    fi
+    
+    rm -f "$csv_file"
     log_success "Added $count allow regex patterns via direct SQL (fast)"
     debug_success "update_allow_regex_v6: Completed successfully"
     print_banner yellow "Completed Allow Regex List"
@@ -575,46 +765,52 @@ update_allow_v6() {
     fi
     debug_log "update_allow_v6: Database exists: $GRAVITY_DB"
     
-    # Use direct SQL INSERT for massive performance improvement
+    # Stage rows in a CSV file and bulk-load via SQLite's .import for
+    # both performance and safe escaping (no SQL string interpolation).
     local count=0
-    local temp_sql="$TEMPDIR/allow_insert.sql"
-    debug_log "update_allow_v6: Creating SQL transaction file: $temp_sql"
-    
-    echo "BEGIN TRANSACTION;" > "$temp_sql" || {
-        log "ERROR: Failed to create SQL transaction file: $temp_sql"
-        debug_log "update_allow_v6: Cannot write to temp directory"
-        return 1
-    }
+    local csv_file="$TEMPDIR/allow_insert.$$.csv"
+    debug_log "update_allow_v6: Staging CSV file: $csv_file"
     
     debug_log "update_allow_v6: Reading domains from $file"
-    while IFS= read -r domain; do
-        [[ -z "$domain" ]] && continue
-        # Type 0 = exact allowlist, enabled = 1
-        local escaped_domain="${domain//\'/\'\'}"
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (0, '${escaped_domain}', 1);" >> "$temp_sql"
-        ((count++))
-        verbose_log "Queued allow domain: $domain"
-    done < "$file"
-    
-    debug_log "update_allow_v6: Queued $count domains for insertion"
-    echo "COMMIT;" >> "$temp_sql"
-    
-    local sql_size=$(stat -c%s "$temp_sql" 2>/dev/null || echo '0')
-    debug_log "update_allow_v6: SQL file size: $sql_size bytes"
-    debug_log "update_allow_v6: Executing SQL transaction"
-    
-    local sql_error="$TEMPDIR/sql_error_$$.log"
-    if ! sqlite3 "$GRAVITY_DB" < "$temp_sql" 2>"$sql_error"; then
-        log "ERROR: Failed to insert allow list"
-        if [[ -f "$sql_error" ]]; then
-            log "ERROR: SQL error: $(cat "$sql_error")"
-            rm -f "$sql_error"
-        fi
-        debug_log "update_allow_v6: SQL execution failed, keeping $temp_sql for inspection"
-        return 1
+    if (( VERBOSE )); then
+        : > "$csv_file" || {
+            log "ERROR: Failed to create CSV stage file: $csv_file"
+            return 1
+        }
+        while IFS= read -r domain || [[ -n "$domain" ]]; do
+            [[ -z "$domain" ]] && continue
+            # Type 0 = exact allowlist, enabled = 1
+            _csv_append_row "$csv_file" "0" "$domain" "1"
+            ((++count))
+            verbose_log "Queued allow domain: $domain"
+        done < "$file"
+    else
+        _csv_stage_constcols "$file" "$csv_file" "0" "1" || {
+            log "ERROR: Failed to stage CSV: $csv_file"
+            return 1
+        }
+        count=$(wc -l < "$csv_file" 2>/dev/null | tr -d ' ')
+        count=${count:-0}
     fi
     
-    rm -f "$temp_sql" "$sql_error"
+    debug_log "update_allow_v6: Queued $count domains for insertion"
+    
+    local csv_size
+    csv_size=$(stat -c%s "$csv_file" 2>/dev/null || echo '0')
+    debug_log "update_allow_v6: CSV stage size: $csv_size bytes"
+    
+    if (( count > 0 )); then
+        debug_log "update_allow_v6: Executing CSV import"
+        if ! _sqlite_csv_import "$csv_file" "domainlist" \
+                "type, domain, enabled" \
+                "type INTEGER, domain TEXT, enabled INTEGER" \
+                "allow list"; then
+            debug_log "update_allow_v6: SQL execution failed, keeping $csv_file for inspection"
+            return 1
+        fi
+    fi
+    
+    rm -f "$csv_file"
     log_success "Added $count allow domains via direct SQL (fast)"
     debug_success "update_allow_v6: Completed successfully"
     print_banner yellow "Completed Allow List"
@@ -637,35 +833,39 @@ update_regex_v6() {
     print_banner green "Starting Regex Block List (v6)"
     
     local count=0
-    local temp_sql="$TEMPDIR/block_regex_insert.sql"
-    debug_log "update_regex_v6: Creating SQL file: $temp_sql"
+    local csv_file="$TEMPDIR/block_regex_insert.$$.csv"
+    debug_log "update_regex_v6: Staging CSV file: $csv_file"
     
-    echo "BEGIN TRANSACTION;" > "$temp_sql"
-    
-    while IFS= read -r pattern; do
-        [[ -z "$pattern" ]] && continue
-        # Type 3 = regex blacklist, enabled = 1
-        local escaped_pattern="${pattern//\'/\'\'}"
-        echo "INSERT OR IGNORE INTO domainlist (type, domain, enabled) VALUES (3, '${escaped_pattern}', 1);" >> "$temp_sql"
-        ((count++))
-        verbose_log "Queued block regex: $pattern"
-    done < "$file"
-    
-    debug_log "update_regex_v6: Queued $count block regex patterns"
-    echo "COMMIT;" >> "$temp_sql"
-    
-    debug_log "update_regex_v6: Executing SQL transaction"
-    local sql_error="$TEMPDIR/sql_error_block_$$.log"
-    if ! sqlite3 "$GRAVITY_DB" < "$temp_sql" 2>"$sql_error"; then
-        log "ERROR: Failed to insert block regex"
-        if [[ -f "$sql_error" ]]; then
-            log "ERROR: SQL error: $(cat "$sql_error")"
-            rm -f "$sql_error"
-        fi
-        return 1
+    # Type 3 = regex blacklist, enabled = 1. Awk fast path; bash loop only
+    # when verbose logging is requested.
+    if (( VERBOSE )); then
+        : > "$csv_file"
+        while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+            [[ -z "$pattern" ]] && continue
+            _csv_append_row "$csv_file" "3" "$pattern" "1"
+            ((++count))
+            verbose_log "Queued block regex: $pattern"
+        done < "$file"
+    else
+        _csv_stage_constcols "$file" "$csv_file" "3" "1"
+        count=$(wc -l < "$csv_file" 2>/dev/null | tr -d ' ')
+        count=${count:-0}
     fi
     
-    rm -f "$temp_sql" "$sql_error"
+    debug_log "update_regex_v6: Queued $count block regex patterns"
+    
+    if (( count > 0 )); then
+        debug_log "update_regex_v6: Executing CSV import"
+        if ! _sqlite_csv_import "$csv_file" "domainlist" \
+                "type, domain, enabled" \
+                "type INTEGER, domain TEXT, enabled INTEGER" \
+                "block regex"; then
+            rm -f "$csv_file"
+            return 1
+        fi
+    fi
+    
+    rm -f "$csv_file"
     log_success "Added $count block regex patterns via direct SQL (fast)"
     debug_success "update_regex_v6: Completed successfully"
     print_banner yellow "Completed Regex Block List"
@@ -688,28 +888,48 @@ update_adlists() {
         return 1
     }
     
-    # Format and prepare adlist
-    grep -v '#' "$file" | grep "/" | sort -u -f > "$TEMPDIR/formatted_adlist.temp" || {
+    # Format and prepare adlist (single awk pass instead of grep|grep|sort).
+    # Matches original `grep -v '#' | grep '/'`: drop any line containing '#'
+    # anywhere, keep only lines containing '/'.
+    awk '/#/ { next } /\// { print }' "$file" 2>/dev/null \
+        | sort -u -f > "$TEMPDIR/formatted_adlist.temp" || {
         log "WARNING: No valid adlists found"
         return 0
     }
     
-    # Insert URLs into database
+    # Stage URLs in a CSV file and bulk-load via SQLite's .import. This
+    # avoids per-row sqlite3 invocations and SQL string interpolation.
+    # Original semantics preserved: explicit id column starting at 1,
+    # plain INSERT (table was just DELETEd so duplicates are impossible).
     local count=0
-    local id=1
-    while IFS= read -r url; do
-        [[ -z "$url" ]] && continue
-        # Escape single quotes for SQL safety (defense in depth)
-        local escaped_url="${url//\'/\'\'}"
-        sqlite3 "$GRAVITY_DB" "INSERT INTO adlist (id, address, enabled) VALUES($id, '$escaped_url', 1)" 2>/dev/null || {
-            log "WARNING: Failed to insert adlist: $url"
-            continue
-        }
-        ((count++))
-        ((id++))
-        verbose_log "Added adlist: $url"
-    done < "$TEMPDIR/formatted_adlist.temp"
+    local csv_file="$TEMPDIR/adlist_insert.$$.csv"
+    if (( VERBOSE )); then
+        : > "$csv_file"
+        local id=1
+        while IFS= read -r url || [[ -n "$url" ]]; do
+            [[ -z "$url" ]] && continue
+            _csv_append_row "$csv_file" "$id" "$url" "1"
+            ((++count))
+            ((++id))
+            verbose_log "Added adlist: $url"
+        done < "$TEMPDIR/formatted_adlist.temp"
+    else
+        _csv_stage_adlist "$TEMPDIR/formatted_adlist.temp" "$csv_file" "1"
+        count=$(wc -l < "$csv_file" 2>/dev/null | tr -d ' ')
+        count=${count:-0}
+    fi
     
+    if (( count > 0 )); then
+        if ! _sqlite_csv_import "$csv_file" "adlist" \
+                "id, address, enabled" \
+                "id INTEGER, address TEXT, enabled INTEGER" \
+                "adlists" \
+                "ignore"; then
+            rm -f "$csv_file"
+            return 1
+        fi
+    fi
+    rm -f "$csv_file"    
     log "Added $count adlists to database"
     print_banner yellow "Completed Adlist Database Update"
 }
@@ -831,6 +1051,7 @@ download_scripts() {
         "${REPO_BASE}/scripts/refresh.sh|$TEMPDIR/refresh.sh"
         "${REPO_BASE}/scripts/Research.sh|$TEMPDIR/Research.sh"
         "${REPO_BASE}/scripts/wireguard-manager.sh|$TEMPDIR/wireguard-manager.sh"
+        "${REPO_BASE}/scripts/ssh-yubikey.sh|$TEMPDIR/ssh-yubikey.sh"
     )
     
     debug_log "download_scripts: Downloading ${#downloads[@]} files"
@@ -945,8 +1166,10 @@ download_test_lists() {
     fi
     
     debug_log "download_test_lists: Merging trial adlists with main adlists"
-    cat "$TEMPDIR/adlists.list.trial.temp" "$TEMPDIR/adlists.list" 2>/dev/null | \
-        grep -v "#" | sort -u -f > "$TEMPDIR/adlists.list.temp" || {
+    # Matches original `grep -v "#"`: drop any line containing '#' anywhere.
+    cat "$TEMPDIR/adlists.list.trial.temp" "$TEMPDIR/adlists.list" 2>/dev/null \
+        | awk '/#/ { next } { print }' \
+        | sort -u -f > "$TEMPDIR/adlists.list.temp" || {
         log_warning "Failed to merge adlists, using original"
         cp "$TEMPDIR/adlists.list" "$TEMPDIR/adlists.list.temp" 2>/dev/null
     }
@@ -1105,17 +1328,10 @@ assemble_and_deploy() {
     debug_log "assemble_and_deploy: Assembling allow regex lists"
     : > "$TEMPDIR/final.allow.regex.temp"
     
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "assemble_and_deploy: Processing allow regex: $file"
-            cat "$file" >> "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.regex.temp' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.allow.regex.temp' "$TEMPDIR/final.allow.regex.temp.raw"
     
     if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
-        grep -v '#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$TEMPDIR/final.allow.regex.temp"
+        _filter_and_sort "$TEMPDIR/final.allow.regex.temp.raw" "$TEMPDIR/final.allow.regex.temp"
         rm -f "$TEMPDIR/final.allow.regex.temp.raw"
         debug_log "assemble_and_deploy: Allow regex assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp" 2>/dev/null || echo 0) entries"
     else
@@ -1126,21 +1342,10 @@ assemble_and_deploy() {
     debug_log "assemble_and_deploy: Assembling allow lists"
     : > "$TEMPDIR/final.allow.temp"
     
-    while IFS= read -r -d '' file; do
-        # Skip .allow.regex.temp files
-        if [[ "$file" == *.allow.regex.temp ]]; then
-            continue
-        fi
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "assemble_and_deploy: Processing allow: $file"
-            cat "$file" >> "$TEMPDIR/final.allow.temp.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.temp' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.allow.temp' "$TEMPDIR/final.allow.temp.raw" '*.allow.regex.temp'
     
     if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
-        grep -v '#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$TEMPDIR/final.allow.temp"
+        _filter_and_sort "$TEMPDIR/final.allow.temp.raw" "$TEMPDIR/final.allow.temp"
         rm -f "$TEMPDIR/final.allow.temp.raw"
         debug_log "assemble_and_deploy: Allow list assembled: $(wc -l < "$TEMPDIR/final.allow.temp" 2>/dev/null || echo 0) entries"
     else
@@ -1151,17 +1356,10 @@ assemble_and_deploy() {
     debug_log "assemble_and_deploy: Assembling regex block lists"
     : > "$TEMPDIR/regex.list"
     
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "assemble_and_deploy: Processing regex: $file"
-            cat "$file" >> "$TEMPDIR/regex.list.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.regex' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.regex' "$TEMPDIR/regex.list.raw"
     
     if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
-        grep -v '#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$TEMPDIR/regex.list"
+        _filter_and_sort "$TEMPDIR/regex.list.raw" "$TEMPDIR/regex.list"
         rm -f "$TEMPDIR/regex.list.raw"
         debug_log "assemble_and_deploy: Regex list assembled: $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
     else
@@ -1172,17 +1370,10 @@ assemble_and_deploy() {
     debug_log "assemble_and_deploy: Assembling encrypted block lists"
     : > "$CONFIG/encrypt.list"
     
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "assemble_and_deploy: Processing block: $file"
-            cat "$file" >> "$CONFIG/encrypt.list.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.block.encrypt.temp' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.block.encrypt.temp' "$CONFIG/encrypt.list.raw"
     
     if [[ -f "$CONFIG/encrypt.list.raw" && -s "$CONFIG/encrypt.list.raw" ]]; then
-        grep -v '#' "$CONFIG/encrypt.list.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$CONFIG/encrypt.list"
+        _filter_and_sort "$CONFIG/encrypt.list.raw" "$CONFIG/encrypt.list"
         rm -f "$CONFIG/encrypt.list.raw"
         debug_log "assemble_and_deploy: Encrypt list assembled: $(wc -l < "$CONFIG/encrypt.list" 2>/dev/null || echo 0) entries"
     else
@@ -1213,6 +1404,7 @@ assemble_and_deploy() {
         "refresh.sh"
         "Research.sh"
         "wireguard-manager.sh"
+        "ssh-yubikey.sh"
     )
     
     debug_log "assemble_and_deploy: Deploying scripts to $FINISHED"
@@ -1242,17 +1434,10 @@ assemble_and_deploy_regex_only() {
     # Assemble only regex block lists with proper glob handling
     : > "$TEMPDIR/regex.list"
     
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "assemble_and_deploy_regex_only: Processing: $file"
-            cat "$file" >> "$TEMPDIR/regex.list.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.regex' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.regex' "$TEMPDIR/regex.list.raw"
     
     if [[ -f "$TEMPDIR/regex.list.raw" && -s "$TEMPDIR/regex.list.raw" ]]; then
-        grep -v '#' "$TEMPDIR/regex.list.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$TEMPDIR/regex.list"
+        _filter_and_sort "$TEMPDIR/regex.list.raw" "$TEMPDIR/regex.list"
         rm -f "$TEMPDIR/regex.list.raw"
         debug_log "assemble_and_deploy_regex_only: Assembled $(wc -l < "$TEMPDIR/regex.list" 2>/dev/null || echo 0) entries"
     else
@@ -1289,18 +1474,11 @@ cleanup() {
     log "Cleaning up temporary files..."
     debug_log "cleanup: Removing all files from $TEMPDIR"
     
-    # Remove all common temp file types
-    rm -f "$TEMPDIR"/*.regex 2>/dev/null || true
-    rm -f "$TEMPDIR"/*.temp 2>/dev/null || true
-    rm -f "$TEMPDIR"/*.gpg 2>/dev/null || true
-    rm -f "$TEMPDIR"/*.sql 2>/dev/null || true
-    rm -f "$TEMPDIR"/*.log 2>/dev/null || true
-    rm -f "$TEMPDIR"/*.list 2>/dev/null || true
-    rm -f "$TEMPDIR"/*.sh 2>/dev/null || true
-    
-    # Clean any remaining files in temp directory
-    if [[ -d "$TEMPDIR" ]]; then
-        rm -rf "$TEMPDIR"/* 2>/dev/null || true
+    # Original code ran 9 explicit `rm -f *.ext` calls and then this same
+    # `rm -rf "$TEMPDIR"/*` — so the explicit calls were redundant. Keep the
+    # final, equivalent step (matches original glob: does NOT touch dotfiles).
+    if [[ -n "${TEMPDIR:-}" && -d "$TEMPDIR" ]]; then
+        rm -rf "${TEMPDIR:?}"/* 2>/dev/null || true
     fi
     
     debug_log "cleanup: Temp directory cleaned"
@@ -1341,6 +1519,7 @@ cmd_refresh() {
         "refresh.sh"
         "Research.sh"
         "wireguard-manager.sh"
+        "ssh-yubikey.sh"
     )
     
     local deployed=0
@@ -1351,10 +1530,10 @@ cmd_refresh() {
             chmod 755 "$TEMPDIR/$script"
             if mv "$TEMPDIR/$script" "$FINISHED/$script" 2>/dev/null; then
                 log_success "Installed: $script"
-                ((deployed++))
+                ((++deployed))
             else
                 log_error "Failed to install: $script"
-                ((failed++))
+                ((++failed))
             fi
         else
             log_warning "Not downloaded: $script (skipping)"
@@ -1436,18 +1615,11 @@ cmd_allow_update() {
     : > "$TEMPDIR/final.allow.regex.temp"
     
     # Use find to safely handle glob patterns (avoids issues when no files match)
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "cmd_allow_update: Processing regex file: $file"
-            cat "$file" >> "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.regex.temp' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.allow.regex.temp' "$TEMPDIR/final.allow.regex.temp.raw"
     
     # Filter and dedupe if we have content
     if [[ -f "$TEMPDIR/final.allow.regex.temp.raw" && -s "$TEMPDIR/final.allow.regex.temp.raw" ]]; then
-        grep -v '#' "$TEMPDIR/final.allow.regex.temp.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$TEMPDIR/final.allow.regex.temp"
+        _filter_and_sort "$TEMPDIR/final.allow.regex.temp.raw" "$TEMPDIR/final.allow.regex.temp"
         rm -f "$TEMPDIR/final.allow.regex.temp.raw"
         debug_log "cmd_allow_update: Allow regex patterns assembled: $(wc -l < "$TEMPDIR/final.allow.regex.temp") entries"
     else
@@ -1461,22 +1633,11 @@ cmd_allow_update() {
     : > "$TEMPDIR/final.allow.temp"
     
     # Use find to safely handle glob patterns
-    while IFS= read -r -d '' file; do
-        # Skip files that end with .regex.temp (already processed above)
-        if [[ "$file" == *.allow.regex.temp ]]; then
-            continue
-        fi
-        if [[ -f "$file" && -s "$file" ]]; then
-            debug_log "cmd_allow_update: Processing allow file: $file"
-            cat "$file" >> "$TEMPDIR/final.allow.temp.raw" 2>/dev/null
-        fi
-    done < <(find "$TEMPDIR" -maxdepth 1 -name '*.allow.temp' -print0 2>/dev/null)
+    _concat_matching "$TEMPDIR" '*.allow.temp' "$TEMPDIR/final.allow.temp.raw" '*.allow.regex.temp'
     
     # Filter and dedupe if we have content
     if [[ -f "$TEMPDIR/final.allow.temp.raw" && -s "$TEMPDIR/final.allow.temp.raw" ]]; then
-        grep -v '#' "$TEMPDIR/final.allow.temp.raw" 2>/dev/null | \
-            grep -v '^$' | grep -v '^[[:space:]]*$' | \
-            sort -u -f > "$TEMPDIR/final.allow.temp"
+        _filter_and_sort "$TEMPDIR/final.allow.temp.raw" "$TEMPDIR/final.allow.temp"
         rm -f "$TEMPDIR/final.allow.temp.raw"
         debug_log "cmd_allow_update: Allow domains assembled: $(wc -l < "$TEMPDIR/final.allow.temp") entries"
     else
